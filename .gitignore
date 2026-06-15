@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+.env
+*.db
+storage/images/*
+storage/thumbnails/*
+!storage/images/.gitkeep
+!storage/thumbnails/.gitkeep
+.pytest_cache/
+.streamlit/
