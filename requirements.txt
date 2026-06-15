@@ -8,7 +8,9 @@ alembic==1.14.0
 httpx==0.28.1
 python-multipart==0.0.20
 Pillow==11.1.0
-streamlit==1.41.1
-pandas==2.2.3
 pytest==8.3.4
 boto3==1.35.92
+# NOTE: the Streamlit dashboard's deps (streamlit, pandas, requests) live in
+# dashboard/requirements.txt — kept out of here so the API stays slim enough
+# for Vercel's serverless size limit. To run the dashboard locally:
+#   pip install -r dashboard/requirements.txt
