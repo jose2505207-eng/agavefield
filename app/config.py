@@ -42,6 +42,9 @@ class Settings(BaseSettings):
     storage_access_key: str = ""
     storage_secret_key: str = ""
     storage_endpoint: str = ""
+    storage_region: str = ""  # required for Supabase S3 (e.g. "us-east-1")
+    # Public object URL base, e.g. https://<ref>.supabase.co/storage/v1/object/public
+    storage_public_base: str = ""
 
     # Public base URL used to build image links in messages/dashboard.
     public_base_url: str = "http://localhost:8000"
