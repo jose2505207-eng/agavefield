@@ -34,8 +34,13 @@ logger = logging.getLogger("agave")
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
-    init_db()
-    Path(STORAGE_ROOT).mkdir(parents=True, exist_ok=True)
+    # Best-effort schema ensure. Must never crash startup: on serverless
+    # (Vercel) the filesystem is read-only and the DB schema already exists
+    # (created via supabase_schema.sql), so a failure here is non-fatal.
+    try:
+        init_db()
+    except Exception as exc:  # pragma: no cover - depends on runtime env
+        logger.warning("Startup init_db skipped (%s); assuming schema already exists", exc)
     logger.info(
         "Agave Field Copilot started (env=%s, telegram=%s, whatsapp=%s, vision=%s)",
         settings.app_env,
