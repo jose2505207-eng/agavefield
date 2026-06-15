@@ -104,3 +104,18 @@ pip install -r requirements.txt
 uvicorn app.main:app --reload --port 8000          # API + /docs
 API_BASE_URL=http://localhost:8000 streamlit run dashboard/app.py   # dashboard :8501
 ```
+
+
+---
+
+## ✅ Provided values — configured (kept out of this public file)
+
+Your Supabase connection string, S3 keys, region, endpoint, and public URL base
+were received and stored locally in **`.env`** (the running app) and **`.env.vercel`**
+(for the Vercel dashboard). Both files are git-ignored and never committed.
+
+- DB: Supabase session pooler (`aws-1-us-east-1.pooler.supabase.com:5432`, ref `sqpsztuoshpmuiajuyok`) — **connected, schema applied**.
+- Storage: bucket `agave` (public) — **validated**.
+- Telegram: `@Ageve0_bot` — webhook live.
+
+> Do not paste live secrets into this tracked file — use `.env` / `.env.vercel`.

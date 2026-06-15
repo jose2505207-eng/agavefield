@@ -23,6 +23,10 @@ class Settings(BaseSettings):
     # --- Telegram ---
     telegram_bot_token: str = ""
     telegram_webhook_secret: str = ""
+    # Process inbound photos inline (true) instead of in a BackgroundTask.
+    # Set true on serverless hosts (e.g. Vercel) where background work after the
+    # response can be killed; keep false locally for snappy acks.
+    telegram_webhook_sync: bool = False
 
     # --- WhatsApp Cloud API (optional) ---
     whatsapp_access_token: str = ""

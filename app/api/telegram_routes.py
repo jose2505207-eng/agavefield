@@ -171,8 +171,8 @@ async def telegram_webhook(
     photos = message.get("photo")
     if photos:
         photo = _largest_photo(photos)
-        background.add_task(
-            _process_photo,
+        telegram_client.send_message(chat_id, "📷 Photo received — Hermes is analyzing it…")
+        args = (
             chat_id,
             telegram_user_id,
             full_name,
@@ -182,7 +182,12 @@ async def telegram_webhook(
             longitude,
             ts,
         )
-        telegram_client.send_message(chat_id, "📷 Photo received — Hermes is analyzing it…")
+        if settings.telegram_webhook_sync:
+            # Serverless-safe: finish processing before returning 200 so the work
+            # is never cut off by the instance freezing after the response.
+            _process_photo(*args)
+        else:
+            background.add_task(_process_photo, *args)
         return {"ok": True}
 
     if latitude is not None and longitude is not None:

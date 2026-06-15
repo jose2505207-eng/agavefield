@@ -3,6 +3,9 @@ __pycache__/
 .venv/
 venv/
 .env
+.env.vercel
+.env.*
+!.env.example
 *.db
 storage/images/*
 storage/thumbnails/*

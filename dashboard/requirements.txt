@@ -1,0 +1,6 @@
+# Slim dependencies for hosting the dashboard on Streamlit Community Cloud.
+# The dashboard is fully decoupled from the backend — it only talks to the API
+# over HTTP (API_BASE_URL), so it does NOT need fastapi/sqlalchemy/boto3/etc.
+streamlit==1.41.1
+pandas==2.2.3
+requests==2.32.3
