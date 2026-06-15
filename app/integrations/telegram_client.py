@@ -61,6 +61,25 @@ def build_action_keyboard(observation_id: int) -> dict:
     }
 
 
+def build_location_request_keyboard() -> dict:
+    """One-tap reply keyboard that sends the user's current location.
+
+    After the user grants Telegram the OS location permission, tapping this
+    button shares their location in a single tap (Telegram cannot read location
+    passively — this is the lowest-friction option).
+    """
+    return {
+        "keyboard": [[{"text": "📍 Share location", "request_location": True}]],
+        "resize_keyboard": True,
+        "one_time_keyboard": True,
+    }
+
+
+def remove_keyboard() -> dict:
+    """Markup that clears a custom reply keyboard."""
+    return {"remove_keyboard": True}
+
+
 def send_message(
     chat_id: Any,
     text: str,

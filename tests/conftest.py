@@ -16,6 +16,7 @@ os.environ["DATABASE_URL"] = f"sqlite:///{_TMP_DB}"
 os.environ["VISION_PROVIDER"] = "openai_compatible"
 os.environ["VISION_API_KEY"] = ""  # -> stub analyzer
 os.environ["TELEGRAM_BOT_TOKEN"] = ""
+os.environ["TELEGRAM_WEBHOOK_SECRET"] = ""  # don't inherit a real .env secret
 os.environ["WHATSAPP_ACCESS_TOKEN"] = ""
 
 import pytest  # noqa: E402

@@ -73,8 +73,16 @@ def _process_photo(
             )
             reply = result.reply_text
             keyboard = telegram_client.build_action_keyboard(result.observation.id)
+            needs_location = result.observation.latitude is None
 
         telegram_client.send_message(chat_id, reply, reply_markup=keyboard)
+        # Offer one-tap location capture when the photo had no GPS.
+        if needs_location:
+            telegram_client.send_message(
+                chat_id,
+                "📍 Tap to attach this plant's location (one tap after allowing it):",
+                reply_markup=telegram_client.build_location_request_keyboard(),
+            )
     except Exception as exc:  # pragma: no cover - defensive
         logger.exception("Telegram photo processing failed: %s", exc)
         telegram_client.send_message(chat_id, "⚠️ Something went wrong analyzing that photo.")
@@ -112,7 +120,13 @@ def _handle_callback(callback: dict) -> None:
             )
         elif action == "reqloc":
             ack = "Location requested"
-            msg = "📍 Please share the plant's location (Telegram attachment → Location)."
+            # Send the one-tap reply keyboard rather than a plain text hint.
+            if chat_id:
+                telegram_client.send_message(
+                    chat_id,
+                    "📍 Tap to share this plant's location:",
+                    reply_markup=telegram_client.build_location_request_keyboard(),
+                )
         elif action == "escalate":
             obs = observation_service.get_observation(db, obs_id)
             if obs:
@@ -135,6 +149,29 @@ def _handle_callback(callback: dict) -> None:
     telegram_client.answer_callback_query(cq_id, ack)
     if chat_id and msg:
         telegram_client.send_message(chat_id, msg)
+
+
+def _attach_location(telegram_user_id: str, latitude: float, longitude: float, chat_id) -> None:
+    """Attach a shared location to the user's most recent un-located observation."""
+    with session_scope() as db:
+        user = observation_service.get_or_create_user(db, telegram_user_id=telegram_user_id)
+        obs = observation_service.latest_unlocated_observation(db, user.id)
+        if not obs:
+            telegram_client.send_message(
+                chat_id,
+                "📍 Got your location — now send a photo (or tap Share location right "
+                "after a photo) and I'll attach it.",
+                reply_markup=telegram_client.remove_keyboard(),
+            )
+            return
+        observation_service.set_observation_location(db, obs, latitude, longitude)
+        lot = obs.lot.lot_code if obs.lot else "unknown"
+        oid = obs.id
+    telegram_client.send_message(
+        chat_id,
+        f"📍 Location saved to observation #{oid} (lot: {lot}). It now appears on the map.",
+        reply_markup=telegram_client.remove_keyboard(),
+    )
 
 
 @router.post("/webhooks/telegram")
@@ -190,11 +227,13 @@ async def telegram_webhook(
             background.add_task(_process_photo, *args)
         return {"ok": True}
 
-    if latitude is not None and longitude is not None:
-        telegram_client.send_message(
-            chat_id,
-            "📍 Location received. Send it together with a photo to attach it to an observation.",
-        )
+    if latitude is not None and longitude is not None and telegram_user_id:
+        # A shared location (from the one-tap button) — attach it to the user's
+        # most recent observation that still lacks coordinates.
+        if settings.telegram_webhook_sync:
+            _attach_location(telegram_user_id, latitude, longitude, chat_id)
+        else:
+            background.add_task(_attach_location, telegram_user_id, latitude, longitude, chat_id)
         return {"ok": True}
 
     if chat_id:

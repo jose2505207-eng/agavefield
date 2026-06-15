@@ -8,7 +8,7 @@ original AI output (requirement 12).
 from __future__ import annotations
 
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional
 
 from sqlalchemy import select
@@ -290,3 +290,65 @@ def list_observations(
         stmt = stmt.where(FieldObservation.needs_human_review == needs_review)
     stmt = stmt.order_by(FieldObservation.observed_at.desc()).limit(limit).offset(offset)
     return list(db.execute(stmt).scalars().all())
+
+
+# --------------------------------------------------------------------------- #
+# Location capture (Telegram one-tap "Share location")
+# --------------------------------------------------------------------------- #
+def latest_unlocated_observation(
+    db: Session, user_id: int, within_minutes: int = 120
+) -> Optional[FieldObservation]:
+    """Most recent observation by this user that still lacks coordinates."""
+    since = datetime.utcnow() - timedelta(minutes=within_minutes)
+    return db.execute(
+        select(FieldObservation)
+        .where(
+            FieldObservation.user_id == user_id,
+            FieldObservation.latitude.is_(None),
+            FieldObservation.observed_at >= since,
+        )
+        .order_by(FieldObservation.observed_at.desc())
+        .limit(1)
+    ).scalar_one_or_none()
+
+
+def set_observation_location(
+    db: Session, observation: FieldObservation, latitude: float, longitude: float
+) -> FieldObservation:
+    """Attach coordinates to an existing observation and enrich it.
+
+    Re-runs lot matching + weather enrichment + passport linking (mirrors the
+    enrichment in the Hermes pipeline) so a late location is as good as one
+    shared up front.
+    """
+    from app.services import passport_service  # local import avoids cycle
+
+    observation.latitude = latitude
+    observation.longitude = longitude
+
+    # Lot matching (only if not already tied to a lot).
+    if observation.lot_id is None:
+        lot = lot_matching_service.match_lot(db, latitude, longitude)
+        if lot:
+            observation.lot_id = lot.id
+            observation.farm_id = lot.farm_id
+
+    # Weather snapshot (graceful: None on failure / no provider).
+    wdata = weather_service.fetch_weather(latitude, longitude, observation.observed_at)
+    if wdata:
+        db.add(WeatherSnapshot(observation_id=observation.id, **wdata))
+
+    # Passport: attach/refresh with the new coordinates.
+    lot = db.get(Lot, observation.lot_id) if observation.lot_id else None
+    passport = passport_service.get_or_create_for_observation(
+        db, lot=lot, latitude=latitude, longitude=longitude
+    )
+    observation.passport_id = passport.id
+    passport_service.update_from_observation(db, passport, observation)
+
+    db.flush()
+    logger.info(
+        "Attached location (%.5f,%.5f) to observation %s (lot=%s)",
+        latitude, longitude, observation.id, observation.lot_id,
+    )
+    return observation
