@@ -117,27 +117,21 @@ def normalize_open_meteo(data: dict, latitude: float, longitude: float) -> Weath
 # Provider-backed API for dashboard / alerts / tasks
 # --------------------------------------------------------------------------- #
 def get_current_weather(latitude: float, longitude: float) -> Optional[dict]:
+    """Real current weather, or None if unavailable.
+
+    No fabricated fallback: callers surface "data not available" when this is
+    None (unless WEATHER_PROVIDER is explicitly set to "mock" for local dev).
+    """
     from app.integrations.weather_provider import get_weather_provider
 
-    provider = get_weather_provider()
-    result = provider.current(latitude, longitude)
-    if result is None and provider.name != "mock":
-        # Graceful fallback so the app never breaks without a provider.
-        from app.integrations.weather_provider import MockWeatherProvider
-
-        logger.info("Falling back to mock weather provider")
-        result = MockWeatherProvider().current(latitude, longitude)
-    return result
+    return get_weather_provider().current(latitude, longitude)
 
 
 def get_forecast(latitude: float, longitude: float, days: int = 3) -> list[dict]:
-    from app.integrations.weather_provider import MockWeatherProvider, get_weather_provider
+    """Real forecast, or [] if unavailable (no fabricated fallback)."""
+    from app.integrations.weather_provider import get_weather_provider
 
-    provider = get_weather_provider()
-    forecast = provider.forecast(latitude, longitude, days)
-    if not forecast and provider.name != "mock":
-        forecast = MockWeatherProvider().forecast(latitude, longitude, days)
-    return forecast
+    return get_weather_provider().forecast(latitude, longitude, days)
 
 
 def treatment_warning(forecast: list[dict]) -> Optional[str]:

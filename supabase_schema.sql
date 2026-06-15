@@ -247,17 +247,7 @@ create table if not exists weekly_reports (
 );
 
 -- =============================================================================
--- Optional: seed a demo farm + two lots near Tequila, Jalisco (handy for the
--- dashboard while you test). Comment out if you don't want demo data.
+-- No seed/demo data. This is a production schema — the database starts empty
+-- and is populated only by real field uploads. Add real farms/lots via the API
+-- or dashboard (POST /lots) when you have actual field boundaries.
 -- =============================================================================
-insert into farms (name, municipality, state, owner_name)
-select 'Rancho El Agave', 'Tequila', 'Jalisco', 'Cooperativa Demo'
-where not exists (select 1 from farms);
-
-insert into lots (farm_id, lot_code, crop_type, estimated_age_months, centroid_latitude, centroid_longitude)
-select f.id, 'TEQ-01', 'agave_azul', 36, 20.8806, -103.8366 from farms f
-where not exists (select 1 from lots where lot_code = 'TEQ-01');
-
-insert into lots (farm_id, lot_code, crop_type, estimated_age_months, centroid_latitude, centroid_longitude)
-select f.id, 'TEQ-02', 'agave_azul', 18, 20.8901, -103.8412 from farms f
-where not exists (select 1 from lots where lot_code = 'TEQ-02');

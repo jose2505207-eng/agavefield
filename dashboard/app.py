@@ -85,6 +85,9 @@ if health:
 if page == "Overview":
     st.header("Field Overview")
     s = api_get("/dashboard/summary")
+    if s and s.get("total_observations", 0) == 0:
+        st.info("📭 No observations yet. Send a photo to the Telegram bot to get started — "
+                "data will appear here in real time.")
     if s:
         c1, c2, c3, c4 = st.columns(4)
         c1.metric("Total observations", s["total_observations"])
@@ -378,21 +381,21 @@ elif page == "Weather":
     lat = c1.number_input("Latitude", value=20.8806, format="%.4f")
     lon = c2.number_input("Longitude", value=-103.8366, format="%.4f")
     ctx = api_get("/api/weather/context", {"lat": lat, "lon": lon}) or {}
-    if not ctx.get("available"):
-        st.warning("Weather unavailable (no provider/coords). The app continues to work.")
     cur = ctx.get("current") or {}
-    if cur:
+    if not cur:
+        st.info("Weather data not available for this location right now.")
+    else:
         m = st.columns(4)
         m[0].metric("Temp °C", cur.get("temperature_c"))
         m[1].metric("Humidity %", cur.get("humidity_percent"))
         m[2].metric("Heat risk", cur.get("heat_risk"))
         m[3].metric("Frost risk", cur.get("frost_risk"))
         st.caption(f"Source: {cur.get('source')}")
-    if ctx.get("treatment_warning"):
-        st.error(f"⚠️ {ctx['treatment_warning']}")
-    if ctx.get("forecast"):
-        st.subheader("Forecast")
-        st.dataframe(pd.DataFrame(ctx["forecast"]), use_container_width=True)
+        if ctx.get("treatment_warning"):
+            st.error(f"⚠️ {ctx['treatment_warning']}")
+        if ctx.get("forecast"):
+            st.subheader("Forecast")
+            st.dataframe(pd.DataFrame(ctx["forecast"]), use_container_width=True)
 
 
 # --------------------------------------------------------------------------- #
@@ -473,7 +476,10 @@ elif page == "Weekly Reports":
         m[3].metric("Overdue", rep.get("overdue_tasks", 0))
         m[4].metric("Completed", rep.get("completed_tasks", 0))
         st.subheader("Top issues")
-        st.dataframe(pd.DataFrame(rep.get("top_issues", []) or [{"issue": "—", "count": 0}]), use_container_width=True)
+        if rep.get("top_issues"):
+            st.dataframe(pd.DataFrame(rep["top_issues"]), use_container_width=True)
+        else:
+            st.info("Data not available — no issues detected in this period.")
         if rep.get("high_risk_zones"):
             st.subheader("High-risk zones")
             st.dataframe(pd.DataFrame(rep["high_risk_zones"]), use_container_width=True)
