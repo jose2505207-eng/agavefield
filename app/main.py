@@ -11,6 +11,9 @@ from fastapi.staticfiles import StaticFiles
 
 from app.api import (
     alert_routes,
+    assignee_routes,
+    audit_routes,
+    catalog_routes,
     dashboard_routes,
     lot_routes,
     map_routes,
@@ -96,3 +99,7 @@ app.include_router(alert_routes.router)
 app.include_router(weather_routes.router)
 app.include_router(report_routes.router)
 app.include_router(map_routes.router)
+# Operations / traceability layer
+app.include_router(assignee_routes.router)
+app.include_router(catalog_routes.router)
+app.include_router(audit_routes.router)

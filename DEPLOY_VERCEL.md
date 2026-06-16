@@ -32,14 +32,14 @@ Then expand **Environment Variables** and add the ones below before clicking **D
 | `DATABASE_URL` | `postgresql://postgres.<ref>:<PASSWORD>@aws-0-<region>.pooler.supabase.com:5432/postgres?sslmode=require` |
 | `STORAGE_PROVIDER` | `s3` |
 | `STORAGE_BUCKET` | `agave` |
-| `STORAGE_ACCESS_KEY` | *(Supabase S3 access key id)* |
-| `STORAGE_SECRET_KEY` | *(Supabase S3 secret)* |
+| `STORAGE_ACCESS_KEY` | *(your Supabase S3 access key — in `.env.vercel`)* |
+| `STORAGE_SECRET_KEY` | *(your Supabase S3 secret — in `.env.vercel`)* |
 | `STORAGE_ENDPOINT` | `https://<ref>.supabase.co/storage/v1/s3` |
-| `STORAGE_REGION` | *(project region, e.g. `us-east-1`)* |
+| `STORAGE_REGION` | *(your project region, e.g. `us-east-1`)* |
 | `STORAGE_PUBLIC_BASE` | `https://<ref>.supabase.co/storage/v1/object/public` |
-| `TELEGRAM_BOT_TOKEN` | *(your BotFather token)* |
+| `TELEGRAM_BOT_TOKEN` | *(your BotFather token — in `.env.vercel`)* |
 | `TELEGRAM_WEBHOOK_SECRET` | *(any random string)* |
-| `PUBLIC_BASE_URL` | `https://<your-deployment>.vercel.app` *(set after first deploy)* |
+| `PUBLIC_BASE_URL` | `https://<your-deployment>.vercel.app` *(https://agavefield-nu.vercel.app/)* |
 | `WEATHER_PROVIDER` | `auto` |
 | `VISION_API_KEY` | *(optional — blank keeps the offline stub)* |
 | `VISION_BASE_URL` | `https://api.openai.com/v1` *(only if using a real model)* |

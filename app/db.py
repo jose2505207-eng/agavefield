@@ -40,6 +40,7 @@ def init_db() -> None:
     For production use Alembic migrations instead.
     """
     from app.models import database as _models  # noqa: F401  (register mappers)
+    from app.models import operations as _ops  # noqa: F401  (register ops mappers)
 
     Base.metadata.create_all(bind=engine)
     logger.info("Database tables ensured at %s", settings.database_url.split("@")[-1])

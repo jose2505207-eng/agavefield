@@ -23,6 +23,7 @@ import pytest  # noqa: E402
 
 from app.db import Base, SessionLocal, engine  # noqa: E402
 from app.models import database as _models  # noqa: E402,F401
+from app.models import operations as _ops  # noqa: E402,F401
 
 
 @pytest.fixture(autouse=True)
