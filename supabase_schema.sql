@@ -276,6 +276,134 @@ create index if not exists ix_obs_review   on field_observations(review_status);
 create index if not exists ix_obs_followup on field_observations(follow_up_needed);
 
 -- =============================================================================
+-- Operations / traceability layer (work orders, catalogs, executions, evidence,
+-- weather, reviews, timeline, audit). The app also auto-creates these on startup
+-- via SQLAlchemy create_all; this block is for fresh installs run from the SQL
+-- editor. Idempotent.
+-- =============================================================================
+create table if not exists assignees (
+  id serial primary key, full_name varchar(255), email varchar(255),
+  phone varchar(32), role varchar(24) default 'field_worker',
+  active boolean default true, preferred_language varchar(8), notes text,
+  created_at timestamp default now(), updated_at timestamp default now()
+);
+create index if not exists ix_assignees_email on assignees(email);
+
+create table if not exists products (
+  id serial primary key, product_name varchar(255), product_type varchar(32) default 'other',
+  active_ingredient varchar(255), allowed boolean default true, restricted boolean default false,
+  prohibited boolean default false, default_dose_value double precision, default_dose_unit varchar(32),
+  min_dose_value double precision, max_dose_value double precision, application_method varchar(128),
+  safety_notes text, regenerative_notes text, carbon_factor_value double precision,
+  carbon_factor_unit varchar(32), carbon_factor_source varchar(255), carbon_factor_version varchar(32),
+  carbon_notes text, active boolean default true, created_by varchar(128),
+  created_at timestamp default now(), updated_at timestamp default now()
+);
+
+create table if not exists activities (
+  id serial primary key, activity_name varchar(255), activity_category varchar(40) default 'other',
+  description text, allowed boolean default true, requires_product boolean default false,
+  requires_photo_evidence boolean default true, default_required_photo_count integer default 1,
+  requires_geolocation boolean default true, requires_surface_area boolean default false,
+  requires_dose boolean default false, requires_weather_snapshot boolean default true,
+  default_follow_up_days integer, recommended_frequency varchar(64),
+  carbon_factor_value double precision, carbon_factor_unit varchar(32), carbon_category varchar(64),
+  carbon_methodology_note text, carbon_factor_source varchar(255), carbon_factor_version varchar(32),
+  active boolean default true, created_by varchar(128),
+  created_at timestamp default now(), updated_at timestamp default now()
+);
+
+create table if not exists work_orders (
+  id serial primary key, work_order_code varchar(32) unique, title varchar(255), description text,
+  field_id integer references farms(id), lot_id integer references lots(id),
+  zone_id integer references field_zones(id), agave_passport_id integer references agave_passports(id),
+  season_id integer, planned_start_date timestamp, due_date timestamp,
+  assigned_to_id integer references assignees(id), assigned_to_email varchar(255), created_by varchar(128),
+  status varchar(24) default 'draft', secure_access_token_hash varchar(128), secure_link_expires_at timestamp,
+  sent_at timestamp, submitted_at timestamp, reviewed_by varchar(128), reviewed_at timestamp, reviewer_notes text,
+  required_photo_evidence_count integer default 1, geolocation_required boolean default true,
+  manual_note_required boolean default true, weather_capture_required boolean default true,
+  review_required boolean default true, deleted_at timestamp,
+  created_at timestamp default now(), updated_at timestamp default now()
+);
+create index if not exists ix_wo_status on work_orders(status);
+create index if not exists ix_wo_token on work_orders(secure_access_token_hash);
+
+create table if not exists work_order_items (
+  id serial primary key, work_order_id integer references work_orders(id),
+  activity_id integer references activities(id), product_id integer references products(id),
+  planned_surface_area_value double precision, planned_surface_area_unit varchar(16),
+  planned_dose_value double precision, planned_dose_unit varchar(32),
+  planned_total_product_value double precision, planned_total_product_unit varchar(16),
+  required_photo_count integer default 1, requires_geolocation boolean default true,
+  requires_weather_snapshot boolean default true, requires_manual_note boolean default true,
+  instructions text, planned_carbon_factor_value double precision, planned_carbon_factor_unit varchar(32),
+  planned_carbon_kgco2e double precision, carbon_factor_snapshot jsonb, status varchar(20) default 'pending',
+  created_at timestamp default now(), updated_at timestamp default now()
+);
+
+create table if not exists ops_weather_snapshots (
+  id serial primary key, field_id integer references farms(id), lot_id integer references lots(id),
+  zone_id integer references field_zones(id), latitude double precision, longitude double precision,
+  weather_datetime timestamp, provider varchar(32), rainfall_current double precision,
+  rainfall_probability double precision, rainfall_last_24h double precision, rainfall_next_24h double precision,
+  temperature_current double precision, temperature_min double precision, temperature_max double precision,
+  humidity double precision, wind_speed double precision, raw_payload_json jsonb, created_at timestamp default now()
+);
+
+create table if not exists execution_records (
+  id serial primary key, work_order_id integer references work_orders(id),
+  work_order_item_id integer references work_order_items(id), activity_id integer references activities(id),
+  product_id integer references products(id), actual_surface_area_value double precision,
+  actual_surface_area_unit varchar(16), actual_dose_value double precision, actual_dose_unit varchar(32),
+  actual_total_product_value double precision, actual_total_product_unit varchar(16),
+  execution_started_at timestamp, execution_completed_at timestamp, responsible_person varchar(128),
+  submitted_by_name varchar(128), submitted_by_email varchar(255), manual_note text,
+  gps_latitude double precision, gps_longitude double precision, gps_accuracy double precision,
+  gps_captured_at timestamp, weather_snapshot_id integer references ops_weather_snapshots(id),
+  weather_snapshot_status varchar(16) default 'pending', actual_carbon_kgco2e double precision,
+  carbon_factor_snapshot jsonb, carbon_calculation_status varchar(20) default 'pending',
+  carbon_override_value double precision, carbon_override_reason text, carbon_override_user varchar(128),
+  carbon_override_at timestamp, compliance_status varchar(20) default 'pending_review',
+  is_revision_of_id integer references execution_records(id), submitted_at timestamp,
+  created_at timestamp default now(), updated_at timestamp default now()
+);
+
+create table if not exists photo_evidence (
+  id serial primary key, file_url varchar(1024), storage_key varchar(512), thumbnail_url varchar(1024),
+  work_order_id integer references work_orders(id), work_order_item_id integer references work_order_items(id),
+  execution_record_id integer references execution_records(id), field_id integer references farms(id),
+  lot_id integer references lots(id), zone_id integer references field_zones(id),
+  agave_passport_id integer references agave_passports(id), gps_latitude double precision,
+  gps_longitude double precision, gps_accuracy double precision, gps_source varchar(16) default 'unavailable',
+  captured_at timestamp, uploaded_at timestamp default now(), uploaded_by varchar(128), manual_note text,
+  weather_snapshot_id integer references ops_weather_snapshots(id), created_at timestamp default now()
+);
+
+create table if not exists reviews (
+  id serial primary key, execution_record_id integer references execution_records(id),
+  review_status varchar(20) default 'pending', reviewer_id integer references assignees(id),
+  reviewer_name varchar(128), reviewer_notes text, correction_requested boolean default false,
+  correction_due_date timestamp, reviewed_at timestamp, created_at timestamp default now()
+);
+
+create table if not exists timeline_events (
+  id serial primary key, entity_type varchar(20), entity_id integer, event_type varchar(40),
+  title varchar(255), description text, event_datetime timestamp default now(),
+  related_work_order_id integer, related_execution_record_id integer, related_product_id integer,
+  related_activity_id integer, related_photo_ids jsonb, carbon_kgco2e double precision,
+  weather_snapshot_id integer, created_by varchar(128), created_at timestamp default now()
+);
+create index if not exists ix_timeline_entity on timeline_events(entity_type, entity_id);
+
+create table if not exists audit_logs (
+  id serial primary key, entity_type varchar(40), entity_id integer, action varchar(32),
+  old_values_json jsonb, new_values_json jsonb, changed_by varchar(128), changed_by_email varchar(255),
+  timestamp timestamp default now(), reason text, ip_address varchar(64), user_agent varchar(512)
+);
+create index if not exists ix_audit_entity on audit_logs(entity_type, entity_id);
+
+-- =============================================================================
 -- No seed/demo data. This is a production schema — the database starts empty
 -- and is populated only by real field uploads. Add real farms/lots via the API
 -- or dashboard (POST /lots) when you have actual field boundaries.

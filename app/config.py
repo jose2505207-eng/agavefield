@@ -59,6 +59,22 @@ class Settings(BaseSettings):
     # Public base URL used to build image links in messages/dashboard.
     public_base_url: str = "http://localhost:8000"
 
+    # --- Operations / work orders ---
+    secret_key: str = "dev-insecure-change-me"  # token hashing; override in prod
+    app_base_url: str = "http://localhost:8000"  # used for secure work-order links
+    work_order_link_expiry_days: int = 14
+
+    # Email delivery for work-order links.
+    email_provider: str = "console"  # console | smtp | sendgrid | resend
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_username: str = ""
+    smtp_password: str = ""
+    smtp_from_email: str = ""
+    smtp_from_name: str = "Agave Field"
+    sendgrid_api_key: str = ""
+    resend_api_key: str = ""
+
     # --- Weather ---
     # auto -> Open-Meteo (no key) if reachable, else mock. mock | openmeteo | openweather
     weather_provider: str = "auto"

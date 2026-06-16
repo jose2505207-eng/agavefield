@@ -185,6 +185,113 @@ class ActivityUpdate(BaseModel):
     active: Optional[bool] = None
 
 
+class WorkOrderItemCreate(BaseModel):
+    activity_id: int
+    product_id: Optional[int] = None
+    instructions: Optional[str] = None
+    planned_surface_area_value: Optional[float] = None
+    planned_surface_area_unit: Optional[str] = None  # ha | m2
+    planned_dose_value: Optional[float] = None
+    planned_dose_unit: Optional[str] = None
+    planned_total_product_value: Optional[float] = None
+    planned_total_product_unit: Optional[str] = None  # kg | l
+    required_photo_count: int = 1
+    requires_geolocation: bool = True
+    requires_weather_snapshot: bool = True
+    requires_manual_note: bool = True
+
+
+class WorkOrderItemRead(BaseModel):
+    id: int
+    work_order_id: int
+    activity_id: int
+    product_id: Optional[int] = None
+    instructions: Optional[str] = None
+    planned_surface_area_value: Optional[float] = None
+    planned_surface_area_unit: Optional[str] = None
+    planned_dose_value: Optional[float] = None
+    planned_dose_unit: Optional[str] = None
+    planned_total_product_value: Optional[float] = None
+    planned_total_product_unit: Optional[str] = None
+    required_photo_count: int
+    requires_geolocation: bool
+    requires_weather_snapshot: bool
+    requires_manual_note: bool
+    planned_carbon_factor_value: Optional[float] = None
+    planned_carbon_factor_unit: Optional[str] = None
+    planned_carbon_kgco2e: Optional[float] = None
+    carbon_factor_snapshot: Optional[dict] = None
+    status: str
+
+    model_config = {"from_attributes": True}
+
+
+class WorkOrderCreate(BaseModel):
+    title: str
+    description: Optional[str] = None
+    field_id: Optional[int] = None
+    lot_id: Optional[int] = None
+    zone_id: Optional[int] = None
+    agave_passport_id: Optional[int] = None
+    season_id: Optional[int] = None
+    planned_start_date: Optional[datetime] = None
+    due_date: Optional[datetime] = None
+    assigned_to_id: Optional[int] = None
+    assigned_to_email: Optional[str] = None
+    created_by: Optional[str] = None
+    required_photo_evidence_count: int = 1
+    geolocation_required: bool = True
+    manual_note_required: bool = True
+    weather_capture_required: bool = True
+    review_required: bool = True
+    items: list[WorkOrderItemCreate] = Field(default_factory=list)
+
+
+class WorkOrderUpdate(BaseModel):
+    title: Optional[str] = None
+    description: Optional[str] = None
+    planned_start_date: Optional[datetime] = None
+    due_date: Optional[datetime] = None
+    assigned_to_id: Optional[int] = None
+    assigned_to_email: Optional[str] = None
+    status: Optional[str] = None
+
+
+class WorkOrderRead(BaseModel):
+    id: int
+    work_order_code: str
+    title: str
+    description: Optional[str] = None
+    field_id: Optional[int] = None
+    lot_id: Optional[int] = None
+    zone_id: Optional[int] = None
+    agave_passport_id: Optional[int] = None
+    season_id: Optional[int] = None
+    planned_start_date: Optional[datetime] = None
+    due_date: Optional[datetime] = None
+    assigned_to_id: Optional[int] = None
+    assigned_to_email: Optional[str] = None
+    created_by: Optional[str] = None
+    status: str
+    sent_at: Optional[datetime] = None
+    submitted_at: Optional[datetime] = None
+    reviewed_by: Optional[str] = None
+    reviewed_at: Optional[datetime] = None
+    secure_link_expires_at: Optional[datetime] = None
+    required_photo_evidence_count: int
+    geolocation_required: bool
+    manual_note_required: bool
+    weather_capture_required: bool
+    review_required: bool
+    created_at: Optional[datetime] = None
+
+    model_config = {"from_attributes": True}
+
+
+class WorkOrderDetail(WorkOrderRead):
+    items: list[WorkOrderItemRead] = Field(default_factory=list)
+
+
 class ActivityRead(BaseModel):
     id: int
     activity_name: str
