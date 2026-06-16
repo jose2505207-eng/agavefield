@@ -292,6 +292,34 @@ class WorkOrderDetail(WorkOrderRead):
     items: list[WorkOrderItemRead] = Field(default_factory=list)
 
 
+# --------------------------------------------------------------------------- #
+# Mobile completion / submission
+# --------------------------------------------------------------------------- #
+class SubmitItem(BaseModel):
+    work_order_item_id: int
+    actual_surface_area_value: Optional[float] = None
+    actual_surface_area_unit: Optional[str] = None
+    actual_dose_value: Optional[float] = None
+    actual_dose_unit: Optional[str] = None
+    actual_total_product_value: Optional[float] = None
+    actual_total_product_unit: Optional[str] = None
+    manual_note: Optional[str] = None
+    evidence_photo_ids: list[int] = Field(default_factory=list)
+
+
+class SubmitPayload(BaseModel):
+    responsible_person: Optional[str] = None
+    submitted_by_name: Optional[str] = None
+    submitted_by_email: Optional[str] = None
+    gps_latitude: Optional[float] = None
+    gps_longitude: Optional[float] = None
+    gps_accuracy: Optional[float] = None
+    gps_captured_at: Optional[datetime] = None
+    execution_started_at: Optional[datetime] = None
+    execution_completed_at: Optional[datetime] = None
+    items: list[SubmitItem] = Field(default_factory=list)
+
+
 class ActivityRead(BaseModel):
     id: int
     activity_name: str
