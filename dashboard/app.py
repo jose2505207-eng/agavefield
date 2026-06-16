@@ -56,6 +56,14 @@ page = st.sidebar.radio(
     "View",
     [
         "Overview",
+        # --- Operations / traceability ---
+        "Work Orders",
+        "Review Queue",
+        "Timeline",
+        "Carbon Dashboard",
+        "Evidence Gallery",
+        "Audit Log",
+        # --- Field records / agronomy ---
         "Agave Passports",
         "Map / Zones",
         "Tasks",
@@ -474,3 +482,215 @@ elif page == "Weekly Reports":
                 if url:
                     tc[i % len(tc)].image(url, use_container_width=True)
         st.caption("Satellite/NDVI regional view: planned for Version 2.")
+
+
+# =========================================================================== #
+# OPERATIONS / TRACEABILITY SECTIONS
+# =========================================================================== #
+WO_STATUS = {"draft": "📝", "scheduled": "🗓️", "sent": "📤", "in_progress": "🚜",
+             "submitted": "📥", "approved": "✅", "rejected": "🚫",
+             "needs_correction": "✏️", "completed": "🏁", "cancelled": "❌"}
+
+
+def _kg(v):
+    return f"{v:,.1f}" if isinstance(v, (int, float)) else "—"
+
+
+if page == "Work Orders":
+    st.header("📋 Work Orders")
+    tab_list, tab_new = st.tabs(["All work orders", "➕ Generate work order"])
+
+    with tab_list:
+        wos = api_get("/api/work-orders") or []
+        if not wos:
+            st.info("No work orders yet. Use 'Generate work order' to create the first one.")
+        for w in wos:
+            icon = WO_STATUS.get(w["status"], "•")
+            with st.container(border=True):
+                cols = st.columns([4, 1])
+                cols[0].markdown(
+                    f"{icon} **{w['work_order_code']} — {w['title']}** · `{w['status']}`\n\n"
+                    f"_Field {w.get('field_id') or '—'} / Lot {w.get('lot_id') or '—'} · "
+                    f"due {(w.get('due_date') or '—')[:10]} · to {w.get('assigned_to_email') or '—'}_"
+                )
+                if w["status"] in ("draft", "scheduled") and cols[1].button("📤 Send", key=f"send{w['id']}"):
+                    r = api_post(f"/api/work-orders/{w['id']}/send")
+                    st.success(f"Sent to {r.get('recipient')}")
+                    if r.get("dev_link"):
+                        st.code(r["dev_link"])
+                    st.cache_data.clear()
+
+    with tab_new:
+        acts = api_get("/api/activities", {"include_inactive": False}) or []
+        prods = api_get("/api/products", {"include_inactive": False}) or []
+        assignees = api_get("/api/assignees", {"include_inactive": False}) or []
+        if not acts:
+            st.warning("Add at least one Activity (with a carbon factor) first via the API/catalog.")
+        with st.form("new_wo"):
+            title = st.text_input("Title")
+            c1, c2, c3 = st.columns(3)
+            field_id = c1.number_input("Field ID", min_value=0, step=1)
+            lot_id = c2.number_input("Lot ID", min_value=0, step=1)
+            due = c3.date_input("Due date", value=None)
+            amap = {f"{a['activity_name']} (#{a['id']})": a["id"] for a in acts}
+            pmap = {"(none)": None} | {f"{p['product_name']} (#{p['id']})": p["id"] for p in prods}
+            asgmap = {"(none)": (None, None)} | {
+                f"{a['full_name']} <{a['email']}>": (a["id"], a["email"]) for a in assignees}
+            act_choice = st.selectbox("Activity", list(amap.keys()) or ["—"])
+            prod_choice = st.selectbox("Product", list(pmap.keys()))
+            asg_choice = st.selectbox("Assign to", list(asgmap.keys()))
+            cc1, cc2 = st.columns(2)
+            surf = cc1.number_input("Planned surface", min_value=0.0, step=0.5)
+            surf_u = cc2.selectbox("Unit", ["ha", "m2"])
+            photos_req = st.number_input("Required photos", min_value=0, value=1, step=1)
+            submitted = st.form_submit_button("Create work order")
+        if submitted and title and acts:
+            asg_id, asg_email = asgmap[asg_choice]
+            payload = {
+                "title": title, "field_id": int(field_id) or None, "lot_id": int(lot_id) or None,
+                "due_date": f"{due}T00:00:00" if due else None,
+                "assigned_to_id": asg_id, "assigned_to_email": asg_email,
+                "items": [{"activity_id": amap[act_choice], "product_id": pmap[prod_choice],
+                           "planned_surface_area_value": surf or None,
+                           "planned_surface_area_unit": surf_u, "required_photo_count": int(photos_req)}],
+            }
+            r = api_post("/api/work-orders", payload)
+            st.success(f"Created {r.get('work_order_code')} (planned carbon "
+                       f"{_kg(r['items'][0].get('planned_carbon_kgco2e'))} kgCO₂e)")
+            st.cache_data.clear()
+
+
+elif page == "Review Queue":
+    st.header("🧑‍🌾 Review Queue")
+    st.caption("Submitted field work awaiting review. Approving never edits the worker's record.")
+    queue = api_get("/api/review-queue") or []
+    if not queue:
+        st.success("Queue empty — all submissions reviewed.")
+    for e in queue:
+        photos = api_get("/api/photos", {"execution_record_id": e["id"]}) or []
+        with st.container(border=True):
+            cols = st.columns([1, 3])
+            if photos and (photos[0].get("thumbnail_url") or photos[0].get("file_url")):
+                cols[0].image(photos[0].get("thumbnail_url") or photos[0]["file_url"], use_container_width=True)
+            cols[1].markdown(
+                f"**Execution #{e['id']}** · WO {e['work_order_id']} · `{e['compliance_status']}`\n\n"
+                f"📝 {e.get('manual_note') or '—'}\n\n"
+                f"Surface {e.get('actual_surface_area_value') or '—'} {e.get('actual_surface_area_unit') or ''} · "
+                f"♻️ {_kg(e.get('actual_carbon_kgco2e'))} kgCO₂e ({e.get('carbon_calculation_status')}) · "
+                f"📍 {'yes' if e.get('gps_latitude') else 'no'} · 🌧️ {e.get('weather_snapshot_status')}"
+            )
+            with cols[1]:
+                notes = st.text_input("Reviewer notes", key=f"rn{e['id']}")
+                bc = st.columns(3)
+                if bc[0].button("✅ Approve", key=f"ap{e['id']}"):
+                    api_post(f"/api/review/{e['id']}/approve", {"reviewer_name": "dashboard", "reviewer_notes": notes})
+                    st.cache_data.clear(); st.rerun()
+                if bc[1].button("✏️ Correction", key=f"co{e['id']}"):
+                    api_post(f"/api/review/{e['id']}/request-correction", {"reviewer_name": "dashboard", "reviewer_notes": notes})
+                    st.cache_data.clear(); st.rerun()
+                if bc[2].button("🚫 Reject", key=f"rj{e['id']}"):
+                    api_post(f"/api/review/{e['id']}/reject", {"reviewer_name": "dashboard", "reviewer_notes": notes})
+                    st.cache_data.clear(); st.rerun()
+
+
+elif page == "Timeline":
+    st.header("🗓️ Timeline")
+    scope = st.radio("Scope", ["Global", "By lot", "By field"], horizontal=True)
+    if scope == "By lot":
+        lid = st.number_input("Lot ID", min_value=1, step=1)
+        events = api_get(f"/api/lots/{int(lid)}/timeline") or []
+    elif scope == "By field":
+        fid = st.number_input("Field ID", min_value=1, step=1)
+        events = api_get(f"/api/fields/{int(fid)}/timeline") or []
+    else:
+        events = api_get("/api/timeline") or []
+    if not events:
+        st.info("No timeline events yet.")
+    for ev in events:
+        st.markdown(
+            f"**{(ev.get('event_datetime') or '')[:16]}** · `{ev['event_type']}` — {ev['title']}"
+            + (f" · ♻️ {_kg(ev.get('carbon_kgco2e'))} kgCO₂e" if ev.get("carbon_kgco2e") else "")
+        )
+        if ev.get("description"):
+            st.caption(ev["description"])
+
+
+elif page == "Carbon Dashboard":
+    st.header("♻️ Carbon Footprint")
+    s = api_get("/api/carbon/summary") or {}
+    if not s or s.get("total_actual_kgco2e") in (None, 0) and s.get("total_planned_kgco2e") in (None, 0):
+        st.info("No carbon data yet — create and complete work orders with carbon factors.")
+    m = st.columns(4)
+    m[0].metric("Planned kgCO₂e", _kg(s.get("total_planned_kgco2e")))
+    m[1].metric("Actual kgCO₂e", _kg(s.get("total_actual_kgco2e")))
+    m[2].metric("Δ Planned→Actual", _kg(s.get("planned_vs_actual_kgco2e")))
+    m[3].metric("kgCO₂e / ha", _kg(s.get("kgco2e_per_hectare")))
+    m2 = st.columns(2)
+    m2[0].metric("Records missing carbon", s.get("records_missing_carbon_data", 0))
+    m2[1].metric("Manual overrides", s.get("manual_overrides", 0))
+    c1, c2 = st.columns(2)
+    with c1:
+        st.subheader("By activity")
+        rows = api_get("/api/carbon/by-activity") or []
+        if rows:
+            st.bar_chart(pd.DataFrame(rows).set_index("activity_name")["kgco2e"])
+        else:
+            st.info("Data not available.")
+    with c2:
+        st.subheader("By product")
+        rows = api_get("/api/carbon/by-product") or []
+        if rows:
+            st.bar_chart(pd.DataFrame(rows).set_index("product_name")["kgco2e"])
+        else:
+            st.info("Data not available.")
+    st.subheader("By lot")
+    lot = api_get("/api/carbon/by-lot") or []
+    st.dataframe(pd.DataFrame(lot) if lot else pd.DataFrame([{"info": "Data not available"}]),
+                 use_container_width=True)
+    miss = api_get("/api/carbon/missing-data") or []
+    if miss:
+        st.subheader("⚠️ Records missing carbon data")
+        st.dataframe(pd.DataFrame(miss), use_container_width=True)
+
+
+elif page == "Evidence Gallery":
+    st.header("📷 Evidence Gallery")
+    f1, f2 = st.columns(2)
+    wo_id = f1.number_input("Work Order ID (0 = all)", min_value=0, step=1)
+    lot_id = f2.number_input("Lot ID (0 = all)", min_value=0, step=1)
+    params = {}
+    if wo_id:
+        params["work_order_id"] = int(wo_id)
+    if lot_id:
+        params["lot_id"] = int(lot_id)
+    photos = api_get("/api/photos", params) or []
+    st.caption(f"{len(photos)} photo(s)")
+    if not photos:
+        st.info("No evidence photos yet.")
+    cols = st.columns(4)
+    for i, p in enumerate(photos):
+        with cols[i % 4]:
+            url = p.get("thumbnail_url") or p.get("file_url")
+            if url:
+                st.image(url, use_container_width=True)
+            gps = "📍" if p.get("gps_latitude") else "⚠️ no GPS"
+            st.caption(f"#{p['id']} · {gps} ({p.get('gps_source')}) · WO {p.get('work_order_id') or '—'}")
+
+
+elif page == "Audit Log":
+    st.header("🧾 Audit Trail")
+    st.caption("Append-only record of key actions (FDA-style traceability).")
+    c1, c2 = st.columns(2)
+    etype = c1.selectbox("Entity type",
+                         ["work_order", "execution_record", "product", "activity", "assignee"])
+    eid = c2.number_input("Entity ID", min_value=1, step=1)
+    if st.button("Load audit history"):
+        rows = api_get(f"/api/audit/{etype}/{int(eid)}") or []
+        if not rows:
+            st.info("No audit entries for this record.")
+        for r in rows:
+            st.markdown(f"**{(r.get('timestamp') or '')[:19]}** · `{r['action']}` · by {r.get('changed_by') or '—'}")
+            if r.get("reason"):
+                st.caption(f"Reason: {r['reason']}")
+            if r.get("new_values"):
+                st.caption(f"New: {r['new_values']}")

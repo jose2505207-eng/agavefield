@@ -13,6 +13,7 @@ from app.api import (
     alert_routes,
     assignee_routes,
     audit_routes,
+    carbon_routes,
     catalog_routes,
     completion_routes,
     ops_photo_routes,
@@ -113,3 +114,4 @@ app.include_router(ops_photo_routes.router)
 app.include_router(completion_routes.router)
 app.include_router(review_routes.router)
 app.include_router(timeline_routes.router)
+app.include_router(carbon_routes.router)
