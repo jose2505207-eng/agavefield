@@ -320,6 +320,61 @@ class SubmitPayload(BaseModel):
     items: list[SubmitItem] = Field(default_factory=list)
 
 
+# --------------------------------------------------------------------------- #
+# Review + timeline
+# --------------------------------------------------------------------------- #
+class ReviewAction(BaseModel):
+    reviewer_name: Optional[str] = None
+    reviewer_id: Optional[int] = None
+    reviewer_notes: Optional[str] = None
+    correction_due_date: Optional[datetime] = None
+
+
+class ExecutionRead(BaseModel):
+    id: int
+    work_order_id: int
+    work_order_item_id: int
+    activity_id: Optional[int] = None
+    product_id: Optional[int] = None
+    actual_surface_area_value: Optional[float] = None
+    actual_surface_area_unit: Optional[str] = None
+    actual_total_product_value: Optional[float] = None
+    actual_total_product_unit: Optional[str] = None
+    responsible_person: Optional[str] = None
+    submitted_by_name: Optional[str] = None
+    manual_note: Optional[str] = None
+    gps_latitude: Optional[float] = None
+    gps_longitude: Optional[float] = None
+    weather_snapshot_id: Optional[int] = None
+    weather_snapshot_status: Optional[str] = None
+    actual_carbon_kgco2e: Optional[float] = None
+    carbon_calculation_status: Optional[str] = None
+    compliance_status: str
+    is_revision_of_id: Optional[int] = None
+    submitted_at: Optional[datetime] = None
+
+    model_config = {"from_attributes": True}
+
+
+class TimelineEventRead(BaseModel):
+    id: int
+    entity_type: str
+    entity_id: int
+    event_type: str
+    title: str
+    description: Optional[str] = None
+    event_datetime: Optional[datetime] = None
+    related_work_order_id: Optional[int] = None
+    related_execution_record_id: Optional[int] = None
+    related_activity_id: Optional[int] = None
+    related_product_id: Optional[int] = None
+    carbon_kgco2e: Optional[float] = None
+    weather_snapshot_id: Optional[int] = None
+    created_by: Optional[str] = None
+
+    model_config = {"from_attributes": True}
+
+
 class ActivityRead(BaseModel):
     id: int
     activity_name: str

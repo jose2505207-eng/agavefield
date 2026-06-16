@@ -16,6 +16,8 @@ from app.api import (
     catalog_routes,
     completion_routes,
     ops_photo_routes,
+    review_routes,
+    timeline_routes,
     work_order_routes,
     dashboard_routes,
     lot_routes,
@@ -109,3 +111,5 @@ app.include_router(audit_routes.router)
 app.include_router(work_order_routes.router)
 app.include_router(ops_photo_routes.router)
 app.include_router(completion_routes.router)
+app.include_router(review_routes.router)
+app.include_router(timeline_routes.router)

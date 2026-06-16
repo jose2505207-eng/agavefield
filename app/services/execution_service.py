@@ -11,6 +11,7 @@ from __future__ import annotations
 import logging
 from datetime import datetime
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models.operations import (
@@ -62,8 +63,18 @@ def submit_execution(db: Session, wo: WorkOrder, payload) -> dict:
             warnings.append("missing_photos")
         compliance = "needs_correction" if warnings else "pending_review"
 
+        # A re-submission for the same item forms a revision chain (never an
+        # overwrite) — preserves the original submitted record.
+        prior_id = db.execute(
+            select(ExecutionRecord.id)
+            .where(ExecutionRecord.work_order_item_id == item.id)
+            .order_by(ExecutionRecord.id.desc())
+            .limit(1)
+        ).scalar_one_or_none()
+
         er = ExecutionRecord(
             work_order_id=wo.id, work_order_item_id=item.id,
+            is_revision_of_id=prior_id,
             activity_id=item.activity_id, product_id=item.product_id,
             actual_surface_area_value=s.actual_surface_area_value,
             actual_surface_area_unit=s.actual_surface_area_unit,
