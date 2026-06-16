@@ -1,9 +1,9 @@
 """Telegram intake webhook.
 
-Receives photo messages (caption, user id, timestamp, optional shared
-location), stores the image, runs Hermes in the background, and replies with a
-concise summary plus action buttons. Also handles button callbacks for the
-confirm / change-lot / false-positive / escalate / request-location workflow.
+MVP (human-centered): receives photo messages and stores them as historical
+field evidence with a manual note + event type + optional follow-up/location.
+NO LLM/CV is invoked on upload. The AI (Hermes) path is gated behind
+ENABLE_AI_IMAGE_ANALYSIS (off by default, for a future version).
 """
 from __future__ import annotations
 
@@ -12,19 +12,14 @@ from datetime import datetime
 from typing import Optional
 
 from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, Request
-from sqlalchemy.orm import Session
 
 from app.agents import hermes_agent
 from app.config import settings
 from app.db import session_scope
 from app.integrations import telegram_client
-from app.models.schemas import (
-    CorrectRequest,
-    HermesInput,
-    HermesOutput,
-    VerifyRequest,
-)
-from app.services import escalation_service, image_service, observation_service
+from app.models.database import FieldObservation
+from app.models.schemas import HermesInput
+from app.services import image_service, observation_service
 
 logger = logging.getLogger("agave.api.telegram")
 router = APIRouter(tags=["webhooks"])
@@ -54,34 +49,55 @@ def _process_photo(
             return
         stored = image_service.store_image_from_url(file_url)
 
+        needs_note = False
         with session_scope() as db:
             user = observation_service.get_or_create_user(
                 db, telegram_user_id=telegram_user_id, full_name=full_name
             )
-            result = hermes_agent.run(
-                db,
-                HermesInput(
+            if settings.enable_ai_image_analysis:
+                # Version 2+ AI path (disabled by default).
+                result = hermes_agent.run(
+                    db,
+                    HermesInput(
+                        image_url=stored.image_url,
+                        thumbnail_url=stored.thumbnail_url,
+                        caption=caption,
+                        user_id=user.id,
+                        source_channel="telegram",
+                        latitude=latitude,
+                        longitude=longitude,
+                        timestamp=ts,
+                    ),
+                )
+                reply = result.reply_text
+                keyboard = telegram_client.build_action_keyboard(result.observation.id)
+            else:
+                # MVP: store the photo as historical evidence + manual note.
+                # NO LLM/CV is invoked.
+                obs = observation_service.create_evidence_record(
+                    db,
+                    manual_note=caption,
                     image_url=stored.image_url,
                     thumbnail_url=stored.thumbnail_url,
-                    caption=caption,
-                    user_id=user.id,
-                    source_channel="telegram",
                     latitude=latitude,
                     longitude=longitude,
-                    timestamp=ts,
-                ),
-            )
-            reply = result.reply_text
-            keyboard = telegram_client.build_action_keyboard(result.observation.id)
-            needs_location = result.observation.latitude is None
+                    observed_at=ts,
+                    user_id=user.id,
+                    source_channel="telegram",
+                )
+                needs_note = not (caption and caption.strip())
+                reply = (
+                    f"📸 Photo saved to the timeline (record #{obs.id}).\n"
+                    "Pick what this photo is about:"
+                )
+                keyboard = telegram_client.build_record_keyboard(obs.id)
 
         telegram_client.send_message(chat_id, reply, reply_markup=keyboard)
-        # Offer one-tap location capture when the photo had no GPS.
-        if needs_location:
+        if needs_note:
             telegram_client.send_message(
                 chat_id,
-                "📍 Tap to attach this plant's location (one tap after allowing it):",
-                reply_markup=telegram_client.build_location_request_keyboard(),
+                "✍️ Please reply with a short note describing this photo "
+                "(required for the field record).",
             )
     except Exception as exc:  # pragma: no cover - defensive
         logger.exception("Telegram photo processing failed: %s", exc)
@@ -92,63 +108,66 @@ def _handle_callback(callback: dict) -> None:
     data = callback.get("data", "")
     cq_id = callback.get("id")
     chat_id = callback.get("message", {}).get("chat", {}).get("id")
-    if ":" not in data:
-        telegram_client.answer_callback_query(cq_id, "Unknown action")
-        return
-    action, raw_id = data.split(":", 1)
-    try:
-        obs_id = int(raw_id)
-    except ValueError:
-        telegram_client.answer_callback_query(cq_id, "Bad observation id")
-        return
+    parts = data.split(":")
+    action = parts[0] if parts else ""
 
-    msg, ack = "", "Done"
-    with session_scope() as db:
-        if action == "confirm":
-            observation_service.verify_observation(db, obs_id, VerifyRequest(human_verified=True))
-            ack, msg = "Confirmed ✅", f"Observation #{obs_id} confirmed. Thank you."
-        elif action == "falsepos":
-            observation_service.correct_observation(
-                db, obs_id, CorrectRequest(human_correction="Marked as false positive by user")
-            )
-            ack, msg = "Marked false positive", f"Observation #{obs_id} marked as false positive."
-        elif action == "changelot":
-            ack = "Send the lot code"
+    ack, msg = "Done", ""
+    try:
+        if action == "evt" and len(parts) == 3:
+            event_type, oid = parts[1], int(parts[2])
+            with session_scope() as db:
+                obs = db.get(FieldObservation, oid)
+                if obs:
+                    obs.event_type = event_type
+            label = event_type.replace("_", " ")
+            ack = f"Event: {label}"
+            msg = f"Record #{oid} marked as “{label}”."
+        elif action == "followup" and len(parts) == 2:
+            oid = int(parts[1])
+            with session_scope() as db:
+                obs = db.get(FieldObservation, oid)
+                if obs:
+                    obs.follow_up_needed = True
+                    obs.review_status = "needs_followup"
+            ack = "Flagged for follow-up"
             msg = (
-                f"To change the lot for observation #{obs_id}, reply with: "
-                f"lot <LOT_CODE> (lot editing via dashboard/API is also available)."
+                f"Record #{oid} flagged for follow-up. A supervisor can set the "
+                "date in Field Notes Review."
             )
-        elif action == "reqloc":
-            ack = "Location requested"
-            # Send the one-tap reply keyboard rather than a plain text hint.
+        elif action == "reqloc" and len(parts) == 2:
+            ack = "Location"
             if chat_id:
                 telegram_client.send_message(
                     chat_id,
-                    "📍 Tap to share this plant's location:",
+                    "📍 Tap to share this record's location:",
                     reply_markup=telegram_client.build_location_request_keyboard(),
                 )
-        elif action == "escalate":
-            obs = observation_service.get_observation(db, obs_id)
-            if obs:
-                hermes_view = HermesOutput(
-                    severity=obs.severity,
-                    suspected_issue=obs.suspected_issue,
-                    confidence=obs.confidence,
-                    agronomic_summary=obs.ai_summary or "",
-                    recommended_next_step=obs.recommended_next_step or "",
-                )
-                escalation_service.maybe_escalate(
-                    db, obs, hermes_view, obs.original_caption, force=True
-                )
-                ack, msg = "Escalated ⚠️", f"Observation #{obs_id} escalated to the field team."
-            else:
-                ack, msg = "Not found", "Observation not found."
         else:
             ack = "Unknown action"
+    except (ValueError, IndexError):
+        ack = "Bad action"
 
     telegram_client.answer_callback_query(cq_id, ack)
     if chat_id and msg:
         telegram_client.send_message(chat_id, msg)
+
+
+def _attach_note(telegram_user_id: str, text: str, chat_id) -> None:
+    """Treat a plain text reply as the manual note for the latest note-less record."""
+    with session_scope() as db:
+        user = observation_service.get_or_create_user(db, telegram_user_id=telegram_user_id)
+        obs = observation_service.latest_note_pending_record(db, user.id)
+        if not obs:
+            telegram_client.send_message(
+                chat_id,
+                "👋 Send a photo of the field to start a record, then reply with your note.",
+            )
+            return
+        obs.manual_note = text
+        if not obs.original_caption:
+            obs.original_caption = text
+        oid = obs.id
+    telegram_client.send_message(chat_id, f"✍️ Note saved to record #{oid}. Thank you.")
 
 
 def _attach_location(telegram_user_id: str, latitude: float, longitude: float, chat_id) -> None:
@@ -208,7 +227,7 @@ async def telegram_webhook(
     photos = message.get("photo")
     if photos:
         photo = _largest_photo(photos)
-        telegram_client.send_message(chat_id, "📷 Photo received — Hermes is analyzing it…")
+        telegram_client.send_message(chat_id, "📷 Photo received — saving to your field timeline…")
         args = (
             chat_id,
             telegram_user_id,
@@ -236,9 +255,19 @@ async def telegram_webhook(
             background.add_task(_attach_location, telegram_user_id, latitude, longitude, chat_id)
         return {"ok": True}
 
+    # Plain text (not a command) → treat as the note for the latest note-less record.
+    text = message.get("text")
+    if text and telegram_user_id and not text.startswith("/"):
+        if settings.telegram_webhook_sync:
+            _attach_note(telegram_user_id, text, chat_id)
+        else:
+            background.add_task(_attach_note, telegram_user_id, text, chat_id)
+        return {"ok": True}
+
     if chat_id:
         telegram_client.send_message(
             chat_id,
-            "👋 Send a photo of an agave plant, row, or symptom and I'll create a field observation.",
+            "👋 Send a photo of an agave plant, row, or field condition. I'll save it to "
+            "the timeline — then reply with a note and pick the event type.",
         )
     return {"ok": True}

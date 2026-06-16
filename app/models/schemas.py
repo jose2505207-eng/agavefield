@@ -46,6 +46,18 @@ class Severity(str, Enum):
     unknown = "unknown"
 
 
+class EventType(str, Enum):
+    observation = "observation"
+    fertilization = "fertilization"
+    compost = "compost"
+    irrigation = "irrigation"
+    pest_treatment = "pest_treatment"
+    herbicide = "herbicide"
+    weed_control = "weed_control"
+    maintenance = "maintenance"
+    follow_up_inspection = "follow_up_inspection"
+
+
 class TaskPriority(str, Enum):
     low = "low"
     medium = "medium"
@@ -133,6 +145,39 @@ class ObservationCreate(BaseModel):
     observed_at: Optional[datetime] = None
 
 
+class EvidenceRecordCreate(BaseModel):
+    """Manual field record (MVP). A human note is REQUIRED. No AI is invoked."""
+
+    manual_note: str = Field(..., min_length=1)
+    event_type: EventType = EventType.observation
+    process_type: Optional[str] = None
+    responsible_person: Optional[str] = None
+    follow_up_needed: bool = False
+    follow_up_date: Optional[datetime] = None
+    lot_id: Optional[int] = None
+    passport_id: Optional[int] = None
+    image_url: Optional[str] = None
+    thumbnail_url: Optional[str] = None
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+    observed_at: Optional[datetime] = None
+    source_channel: str = "api"
+    user_id: Optional[int] = None
+
+
+class FieldNoteReview(BaseModel):
+    """Supervisor/agronomist review of a submitted field record."""
+
+    event_type: Optional[EventType] = None
+    process_type: Optional[str] = None
+    agronomist_notes: Optional[str] = None
+    responsible_person: Optional[str] = None
+    approved: Optional[bool] = None
+    request_followup: Optional[bool] = None
+    follow_up_date: Optional[datetime] = None
+    reviewed_by: Optional[str] = None
+
+
 class WeatherRead(BaseModel):
     temperature_c: Optional[float] = None
     humidity_percent: Optional[float] = None
@@ -189,6 +234,15 @@ class ObservationRead(BaseModel):
     human_notes: Optional[str] = None
     validated_by: Optional[str] = None
     validated_at: Optional[datetime] = None
+    # Human-centered record fields (MVP)
+    manual_note: Optional[str] = None
+    event_type: str = "observation"
+    process_type: Optional[str] = None
+    responsible_person: Optional[str] = None
+    follow_up_needed: bool = False
+    follow_up_date: Optional[datetime] = None
+    agronomist_notes: Optional[str] = None
+    review_status: str = "pending_review"
     status: str
     escalation_status: str
     created_at: Optional[datetime] = None

@@ -22,32 +22,28 @@ def _photo_dict(obs) -> dict:
         "image_url": obs.image_url,
         "thumbnail_url": obs.thumbnail_url,
         "observed_at": obs.observed_at,
-        "severity": obs.severity,
-        "diagnosis": obs.diagnosis or obs.suspected_issue,
-        "summary": obs.ai_summary,
+        "event_type": obs.event_type,
+        "manual_note": obs.manual_note or obs.original_caption,
+        "process_type": obs.process_type,
+        "responsible_person": obs.responsible_person,
     }
 
 
 def generate_change_summary(before: dict, after: dict) -> str:
-    """Placeholder change summary.
+    """Human comparison context — NO AI evaluation.
 
-    TODO(v2): pass both image URLs to a multimodal model for a real visual diff.
-    For now we produce a deterministic, honest summary from stored metadata.
+    Surfaces the two human-selected records (dates + manual notes) for a person
+    to compare side by side. The judgement stays with the agronomist.
     """
-    sev_rank = {"low": 1, "medium": 2, "high": 3, "critical": 4, "unknown": 0}
-    b = sev_rank.get(before.get("severity", "unknown"), 0)
-    a = sev_rank.get(after.get("severity", "unknown"), 0)
-    if a > b:
-        trend = "The condition appears to have worsened since the previous inspection."
-    elif a < b:
-        trend = "The condition appears to have improved since the previous inspection."
-    else:
-        trend = "The condition appears broadly similar to the previous inspection."
+    def _d(x):
+        return str(x.get("observed_at"))[:10] if x.get("observed_at") else "n/a"
+
     return (
-        f"{trend} Previous: {before.get('diagnosis') or 'n/a'} "
-        f"(severity {before.get('severity')}). "
-        f"Current: {after.get('diagnosis') or 'n/a'} (severity {after.get('severity')}). "
-        "[Placeholder summary — enable a vision model for a true visual diff.]"
+        f"Before ({_d(before)}): {before.get('manual_note') or 'no note'} "
+        f"[{before.get('event_type')}]. "
+        f"After ({_d(after)}): {after.get('manual_note') or 'no note'} "
+        f"[{after.get('event_type')}]. "
+        "Compare the two photos manually — the agronomist decides what changed."
     )
 
 

@@ -119,6 +119,20 @@ class FieldObservation(Base, TimestampMixin):
     validated_by: Mapped[Optional[str]] = mapped_column(String(128))
     validated_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
 
+    # --- Human-centered field record (MVP: photo as historical evidence) ---
+    manual_note: Mapped[Optional[str]] = mapped_column(Text)  # required human note
+    event_type: Mapped[str] = mapped_column(
+        String(32), default="observation", index=True
+    )  # observation|fertilization|compost|irrigation|pest_treatment|herbicide|weed_control|maintenance|follow_up_inspection
+    process_type: Mapped[Optional[str]] = mapped_column(String(48))  # related process/treatment
+    responsible_person: Mapped[Optional[str]] = mapped_column(String(128))
+    follow_up_needed: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    follow_up_date: Mapped[Optional[datetime]] = mapped_column(DateTime)
+    agronomist_notes: Mapped[Optional[str]] = mapped_column(Text)  # added during review
+    review_status: Mapped[str] = mapped_column(
+        String(24), default="pending_review", index=True
+    )  # pending_review|approved|needs_followup
+
     status: Mapped[str] = mapped_column(String(32), default="new", index=True)
     escalation_status: Mapped[str] = mapped_column(String(32), default="none", index=True)
 

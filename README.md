@@ -1,18 +1,23 @@
 # 🌵 Agave Field Copilot
 
-AI-powered **field intelligence** for agronomists working in the agave industry
-in Jalisco, Mexico.
+A **human-centered field record system** for agronomists working in the agave
+industry in Jalisco, Mexico.
 
-An agronomist sends a photo of an agave plant, row, pest/disease symptom, soil
-or lot condition through **Telegram** (or **WhatsApp**). The system stores the
-image, analyzes it with a vision model via the **Hermes** agent, extracts
-structured agronomic observations, enriches them with **weather** and **lot**
-context, writes everything to **PostgreSQL**, surfaces it on a **dashboard with
-photos**, and automatically **escalates** serious cases to supervisors.
+A field worker sends a photo of an agave plant, row, soil or lot condition
+through **Telegram**. The system stores the photo as **historical evidence**,
+captures a **manual note**, an **event type** (observation, fertilization,
+irrigation, pest treatment, etc.), an optional **process/treatment**, the
+**responsible person**, and a **follow-up**, links it to an **Agave Passport /
+Lot / Zone** timeline, and surfaces it on a **dashboard with photos** plus a
+**Field Notes Review** workflow for supervisors.
 
-> This is a field operations system, not a chatbot. **The agronomist is always
-> the expert.** Hermes assists, expresses uncertainty, never gives a definitive
-> disease diagnosis, and never recommends chemical products or dosages.
+> **MVP scope (important):** photos are treated as **historical evidence, not
+> AI-analyzed inputs**. **No LLM or computer-vision model is called on upload.**
+> The app is fully usable **without any AI API key**. AI image analysis exists
+> only behind the feature flag `ENABLE_AI_IMAGE_ANALYSIS` (**off by default**)
+> and is reserved for a future version, once enough human-labeled history
+> exists. Core behavior: **Photo + Human Note + Process + Date + Follow-up =
+> Reliable Agave History.**
 
 ---
 
@@ -143,7 +148,8 @@ token → sends are logged instead of delivered.
 | `VISION_PROVIDER` | `openai_compatible` (falls back to stub) | `openai_compatible` |
 | `VISION_API_KEY` | Vision model key; blank → offline stub | _empty_ |
 | `VISION_BASE_URL` | OpenAI-compatible base URL | `https://api.openai.com/v1` |
-| `VISION_MODEL` | Multimodal model id | `gpt-4o-mini` |
+| `VISION_MODEL` | Multimodal model id (AI path only) | `gpt-4o-mini` |
+| `ENABLE_AI_IMAGE_ANALYSIS` | Gate for AI image analysis. **Keep `false`** in the MVP | `false` |
 | `STORAGE_PROVIDER` | `local` or `s3` | `local` |
 | `STORAGE_*` | S3 bucket/keys/endpoint | _empty_ |
 | `WEATHER_PROVIDER` | `auto` / `mock` / `openmeteo` / `openweather` | `auto` |

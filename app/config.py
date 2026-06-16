@@ -40,6 +40,12 @@ class Settings(BaseSettings):
     vision_base_url: str = "https://api.openai.com/v1"
     vision_model: str = "gpt-4o-mini"
 
+    # MVP is a human-centered record system: NO LLM/CV runs on photo upload.
+    # Photos are stored as historical evidence with manual notes. Any AI image
+    # analysis (Hermes) is gated behind this flag and is OFF by default.
+    # Version 2+ may enable it once enough human-labeled history exists.
+    enable_ai_image_analysis: bool = False
+
     # --- Storage ---
     storage_provider: str = "local"  # local | s3
     storage_bucket: str = ""

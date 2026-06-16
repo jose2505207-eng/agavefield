@@ -80,6 +80,36 @@ def remove_keyboard() -> dict:
     return {"remove_keyboard": True}
 
 
+def build_record_keyboard(observation_id: int) -> dict:
+    """Inline keyboard for a human field record: pick event type, flag a
+    follow-up, or attach location. No AI actions."""
+    o = observation_id
+    return {
+        "inline_keyboard": [
+            [
+                {"text": "🌱 Observation", "callback_data": f"evt:observation:{o}"},
+                {"text": "💧 Irrigation", "callback_data": f"evt:irrigation:{o}"},
+            ],
+            [
+                {"text": "🧪 Fertilization", "callback_data": f"evt:fertilization:{o}"},
+                {"text": "🍂 Compost", "callback_data": f"evt:compost:{o}"},
+            ],
+            [
+                {"text": "🐛 Pest treatment", "callback_data": f"evt:pest_treatment:{o}"},
+                {"text": "🌿 Herbicide", "callback_data": f"evt:herbicide:{o}"},
+            ],
+            [
+                {"text": "✂️ Weed control", "callback_data": f"evt:weed_control:{o}"},
+                {"text": "🔧 Maintenance", "callback_data": f"evt:maintenance:{o}"},
+            ],
+            [
+                {"text": "⏰ Needs follow-up", "callback_data": f"followup:{o}"},
+                {"text": "📍 Add location", "callback_data": f"reqloc:{o}"},
+            ],
+        ]
+    }
+
+
 def send_message(
     chat_id: Any,
     text: str,

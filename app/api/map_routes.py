@@ -43,10 +43,10 @@ def zone_markers(db: Session = Depends(get_db)):
                 zone_name=p.zone_name,
                 latitude=p.latitude,
                 longitude=p.longitude,
-                severity=latest.severity if latest else p.risk_level,
+                severity=(latest.event_type if latest else "observation"),
                 status=p.health_status,
                 latest_photo=(latest.thumbnail_url or latest.image_url) if latest else None,
-                latest_observation=latest.ai_summary if latest else None,
+                latest_observation=(latest.manual_note or latest.original_caption) if latest else None,
                 inspection_date=p.last_inspection_at,
                 passport_id=p.id,
             )

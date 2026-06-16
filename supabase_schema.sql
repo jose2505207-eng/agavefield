@@ -120,11 +120,23 @@ create table if not exists field_observations (
   human_notes               text,
   validated_by              varchar(128),
   validated_at              timestamp,
+  -- Human-centered record fields (MVP: photo as historical evidence)
+  manual_note               text,
+  event_type                varchar(32) default 'observation',
+  process_type              varchar(48),
+  responsible_person        varchar(128),
+  follow_up_needed          boolean default false,
+  follow_up_date            timestamp,
+  agronomist_notes          text,
+  review_status             varchar(24) default 'pending_review',
   status                    varchar(32) default 'new',
   escalation_status         varchar(32) default 'none',
   created_at                timestamp default now(),
   updated_at                timestamp default now()
 );
+create index if not exists ix_obs_event     on field_observations(event_type);
+create index if not exists ix_obs_review     on field_observations(review_status);
+create index if not exists ix_obs_followup   on field_observations(follow_up_needed);
 create index if not exists ix_obs_user      on field_observations(user_id);
 create index if not exists ix_obs_farm      on field_observations(farm_id);
 create index if not exists ix_obs_lot       on field_observations(lot_id);
@@ -245,6 +257,23 @@ create table if not exists weekly_reports (
   payload_json  jsonb not null,
   created_at    timestamp default now()
 );
+
+-- =============================================================================
+-- Migrations for EXISTING databases (idempotent). Safe to run on a DB created
+-- before the human-centered record fields existed. New installs already have
+-- them from the CREATE above.
+-- =============================================================================
+alter table field_observations add column if not exists manual_note          text;
+alter table field_observations add column if not exists event_type           varchar(32) default 'observation';
+alter table field_observations add column if not exists process_type         varchar(48);
+alter table field_observations add column if not exists responsible_person   varchar(128);
+alter table field_observations add column if not exists follow_up_needed     boolean default false;
+alter table field_observations add column if not exists follow_up_date       timestamp;
+alter table field_observations add column if not exists agronomist_notes     text;
+alter table field_observations add column if not exists review_status        varchar(24) default 'pending_review';
+create index if not exists ix_obs_event    on field_observations(event_type);
+create index if not exists ix_obs_review   on field_observations(review_status);
+create index if not exists ix_obs_followup on field_observations(follow_up_needed);
 
 -- =============================================================================
 -- No seed/demo data. This is a production schema — the database starts empty

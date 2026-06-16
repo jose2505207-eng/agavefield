@@ -15,6 +15,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from app.models.database import (
+    AgavePassport,
     FieldObservation,
     Lot,
     ModelOutput,
@@ -305,6 +306,192 @@ def latest_unlocated_observation(
         .where(
             FieldObservation.user_id == user_id,
             FieldObservation.latitude.is_(None),
+            FieldObservation.observed_at >= since,
+        )
+        .order_by(FieldObservation.observed_at.desc())
+        .limit(1)
+    ).scalar_one_or_none()
+
+
+def create_evidence_record(
+    db: Session,
+    *,
+    manual_note: Optional[str] = None,
+    event_type: str = "observation",
+    process_type: Optional[str] = None,
+    responsible_person: Optional[str] = None,
+    follow_up_needed: bool = False,
+    follow_up_date: Optional[datetime] = None,
+    lot_id: Optional[int] = None,
+    passport_id: Optional[int] = None,
+    image_url: Optional[str] = None,
+    thumbnail_url: Optional[str] = None,
+    latitude: Optional[float] = None,
+    longitude: Optional[float] = None,
+    observed_at: Optional[datetime] = None,
+    source_channel: str = "telegram",
+    user_id: Optional[int] = None,
+    fetch_weather: bool = True,
+) -> FieldObservation:
+    """Create a human-entered field record (MVP). No LLM/CV is invoked.
+
+    The photo is stored as historical evidence with a manual note, event type,
+    optional process/treatment, responsible person and follow-up. AI columns are
+    left at neutral defaults (no diagnosis/confidence/severity).
+    """
+    from app.services import passport_service, task_service  # local: avoid cycles
+
+    if hasattr(event_type, "value"):
+        event_type = event_type.value
+
+    lot: Optional[Lot] = None
+    if lot_id:
+        lot = db.get(Lot, lot_id)
+    elif latitude is not None and longitude is not None:
+        lot = lot_matching_service.match_lot(db, latitude, longitude)
+
+    observed = observed_at or datetime.utcnow()
+    obs = FieldObservation(
+        user_id=user_id,
+        lot_id=lot.id if lot else None,
+        farm_id=lot.farm_id if lot else None,
+        source_channel=source_channel,
+        image_url=image_url,
+        thumbnail_url=thumbnail_url,
+        original_caption=manual_note,
+        manual_note=manual_note,
+        event_type=event_type,
+        process_type=process_type,
+        responsible_person=responsible_person,
+        follow_up_needed=follow_up_needed,
+        follow_up_date=follow_up_date,
+        latitude=latitude,
+        longitude=longitude,
+        observed_at=observed,
+        # No AI: neutral defaults, human review tracked via review_status.
+        needs_human_review=False,
+        review_status="pending_review",
+        status="new",
+    )
+    db.add(obs)
+    db.flush()
+
+    # Passport linking (timeline memory) — no AI health/risk scoring.
+    if passport_id:
+        passport = db.get(AgavePassport, passport_id)
+    else:
+        passport = passport_service.get_or_create_for_observation(
+            db, lot=lot, latitude=latitude, longitude=longitude
+        )
+    if passport:
+        obs.passport_id = passport.id
+        passport.last_inspection_at = observed
+        if follow_up_needed and follow_up_date:
+            passport.next_inspection_at = follow_up_date
+
+    # Optional weather context (not AI; graceful None on failure).
+    if fetch_weather and latitude is not None and longitude is not None:
+        wdata = weather_service.fetch_weather(latitude, longitude, observed)
+        if wdata:
+            db.add(WeatherSnapshot(observation_id=obs.id, **wdata))
+
+    # Human-requested follow-up becomes a task.
+    if follow_up_needed:
+        task_service.create_task(
+            db,
+            passport_id=obs.passport_id,
+            observation_id=obs.id,
+            title=f"Follow-up: {event_type.replace('_', ' ')}",
+            description=manual_note,
+            due_date=follow_up_date,
+            source="follow_up",
+            priority="medium",
+        )
+
+    db.flush()
+    logger.info("Created evidence record %s (event=%s, lot=%s)", obs.id, event_type, obs.lot_id)
+    return obs
+
+
+def review_record(db: Session, observation_id: int, payload) -> FieldObservation:
+    """Field Notes Review: supervisor corrects/approves a human record.
+
+    Replaces the AI validation queue. Records an immutable audit row.
+    """
+    from app.models.database import HumanValidation
+    from app.services import task_service
+
+    obs = db.get(FieldObservation, observation_id)
+    if not obs:
+        raise ValueError(f"Observation {observation_id} not found")
+
+    if payload.event_type:
+        obs.event_type = payload.event_type.value
+    if payload.process_type is not None:
+        obs.process_type = payload.process_type
+    if payload.responsible_person is not None:
+        obs.responsible_person = payload.responsible_person
+    if payload.agronomist_notes:
+        obs.agronomist_notes = payload.agronomist_notes
+
+    if payload.request_followup:
+        obs.follow_up_needed = True
+        obs.follow_up_date = payload.follow_up_date
+        obs.review_status = "needs_followup"
+        task_service.create_task(
+            db,
+            passport_id=obs.passport_id,
+            observation_id=obs.id,
+            title=f"Follow-up photo: {obs.event_type.replace('_', ' ')}",
+            description=payload.agronomist_notes or obs.manual_note,
+            due_date=payload.follow_up_date,
+            source="follow_up",
+            priority="medium",
+        )
+    if payload.approved:
+        obs.review_status = "approved"
+        obs.human_verified = True
+        obs.status = "approved"
+        obs.validated_by = payload.reviewed_by
+        obs.validated_at = datetime.utcnow()
+
+    db.add(
+        HumanValidation(
+            observation_id=obs.id,
+            status="approved" if payload.approved else "reviewed",
+            corrected_label=obs.event_type,
+            notes=payload.agronomist_notes,
+            validated_by=payload.reviewed_by,
+        )
+    )
+    db.flush()
+    logger.info("Reviewed record %s (status=%s)", observation_id, obs.review_status)
+    return obs
+
+
+def records_pending_review(db: Session, limit: int = 100) -> list[FieldObservation]:
+    return list(
+        db.execute(
+            select(FieldObservation)
+            .where(FieldObservation.review_status == "pending_review")
+            .order_by(FieldObservation.observed_at.desc())
+            .limit(limit)
+        )
+        .scalars()
+        .all()
+    )
+
+
+def latest_note_pending_record(
+    db: Session, user_id: int, within_minutes: int = 180
+) -> Optional[FieldObservation]:
+    """Most recent record by this user that still lacks a manual note."""
+    since = datetime.utcnow() - timedelta(minutes=within_minutes)
+    return db.execute(
+        select(FieldObservation)
+        .where(
+            FieldObservation.user_id == user_id,
+            FieldObservation.manual_note.is_(None),
             FieldObservation.observed_at >= since,
         )
         .order_by(FieldObservation.observed_at.desc())

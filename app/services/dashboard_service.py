@@ -49,8 +49,45 @@ def summary(db: Session) -> dict:
     )
     verification_rate = round(verified / total, 3) if total else 0.0
 
+    # --- Human-centered (MVP) aggregates ---
+    by_event_type = dict(
+        db.execute(
+            select(FieldObservation.event_type, func.count(FieldObservation.id)).group_by(
+                FieldObservation.event_type
+            )
+        ).all()
+    )
+    photo_count = (
+        db.scalar(
+            select(func.count(FieldObservation.id)).where(FieldObservation.image_url.is_not(None))
+        )
+        or 0
+    )
+    pending_review = (
+        db.scalar(
+            select(func.count(FieldObservation.id)).where(
+                FieldObservation.review_status == "pending_review"
+            )
+        )
+        or 0
+    )
+    follow_ups_pending = (
+        db.scalar(
+            select(func.count(FieldObservation.id)).where(
+                FieldObservation.follow_up_needed.is_(True)
+            )
+        )
+        or 0
+    )
+
     return {
         "total_observations": total,
+        "photo_count": photo_count,
+        "observations_by_event_type": by_event_type,
+        "pending_review": pending_review,
+        "follow_ups_pending": follow_ups_pending,
+        "approved_records": verified,
+        # Retained for the optional AI (V2) path; 0 in the human-centered MVP.
         "observations_by_severity": by_severity,
         "observations_by_suspected_issue": by_issue,
         "needs_human_review": needs_review,

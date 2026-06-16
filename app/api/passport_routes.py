@@ -57,3 +57,13 @@ def compare_photos(passport_id: int, db: Session = Depends(get_db)):
     if not passport_service.get_passport(db, passport_id):
         raise HTTPException(404, "Passport not found")
     return comparison_service.compare_passport_photos(db, passport_id)
+
+
+@router.get("/{passport_id}/timeline", response_model=list[ObservationRead])
+def passport_timeline(passport_id: int, db: Session = Depends(get_db)):
+    """Chronological human-entered record history for this passport (oldest first)."""
+    p = passport_service.get_passport(db, passport_id)
+    if not p:
+        raise HTTPException(404, "Passport not found")
+    records = sorted(p.observations, key=lambda o: o.observed_at or o.created_at)
+    return [ObservationRead.model_validate(o) for o in records]

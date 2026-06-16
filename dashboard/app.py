@@ -62,7 +62,7 @@ page = st.sidebar.radio(
         "Alerts",
         "Weather",
         "Before / After",
-        "Validation Queue",
+        "Field Notes Review",
         "Weekly Reports",
         "Photo Gallery",
         "Observation Detail",
@@ -90,42 +90,33 @@ if page == "Overview":
                 "data will appear here in real time.")
     if s:
         c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Total observations", s["total_observations"])
-        c2.metric("Needs human review", s["needs_human_review"])
-        c3.metric("Escalations sent", s["escalations_sent"])
-        c4.metric("Verification rate", f"{s['human_verification_rate'] * 100:.0f}%")
+        c1.metric("Total records", s.get("total_observations", 0))
+        c2.metric("Photos", s.get("photo_count", 0))
+        c3.metric("Pending review", s.get("pending_review", 0))
+        c4.metric("Follow-ups needed", s.get("follow_ups_pending", 0))
 
-        col_a, col_b = st.columns(2)
-        with col_a:
-            st.subheader("By severity")
-            sev = s["observations_by_severity"]
-            if sev:
-                st.bar_chart(pd.Series(sev, name="count"))
-            else:
-                st.info("No observations yet.")
-        with col_b:
-            st.subheader("By suspected issue")
-            iss = s["observations_by_suspected_issue"]
-            if iss:
-                st.bar_chart(pd.Series(iss, name="count"))
-            else:
-                st.info("No issues recorded yet.")
+        st.subheader("By event type")
+        evt = s.get("observations_by_event_type") or {}
+        if evt:
+            st.bar_chart(pd.Series(evt, name="count"))
+        else:
+            st.info("No records yet.")
 
-    st.subheader("Recent observations")
+    st.subheader("Recent records")
     recent = api_get("/dashboard/recent-observations", {"limit": 10}) or []
     for o in recent:
         cols = st.columns([1, 4])
         thumb = o.get("thumbnail_url") or o.get("image_url")
         if thumb:
             cols[0].image(thumb, width=120)
-        sev = SEVERITY_COLORS.get(o["severity"], "⚪")
+        fu = " · ⏰ follow-up" if o.get("follow_up_needed") else ""
+        note = o.get("manual_note") or "_(no note yet)_"
         cols[1].markdown(
-            f"**#{o['id']}** {sev} `{o['severity']}` · "
-            f"{o.get('suspected_issue') or o['plant_condition']} · "
-            f"conf {o['confidence'] * 100:.0f}%\n\n{o.get('ai_summary') or ''}"
+            f"**#{o['id']}** · `{o.get('event_type', 'observation')}`{fu}\n\n"
+            f"📝 {note}\n\n_{o.get('observed_at', '')[:16]} · review: {o.get('review_status', 'pending_review')}_"
         )
 
-    st.subheader("Lot risk ranking")
+    st.subheader("Lot activity ranking")
     ranking = api_get("/dashboard/lot-risk-ranking") or []
     if ranking:
         st.dataframe(pd.DataFrame(ranking), use_container_width=True)
@@ -136,22 +127,19 @@ if page == "Overview":
 # --------------------------------------------------------------------------- #
 elif page == "Photo Gallery":
     st.header("Photo Gallery")
-    f1, f2, f3 = st.columns(3)
-    severity = f1.selectbox("Severity", ["", "critical", "high", "medium", "low", "unknown"])
+    f1, f2 = st.columns(2)
     lots = api_get("/lots") or []
     lot_map = {f"{l['lot_code']} (#{l['id']})": l["id"] for l in lots}
-    lot_choice = f2.selectbox("Lot", [""] + list(lot_map.keys()))
-    issue = f3.text_input("Suspected issue contains")
+    lot_choice = f1.selectbox("Lot", [""] + list(lot_map.keys()))
+    note_q = f2.text_input("Note contains")
 
     params = {"limit": 60}
-    if severity:
-        params["severity"] = severity
     if lot_choice:
         params["lot_id"] = lot_map[lot_choice]
-    if issue:
-        params["suspected_issue"] = issue
 
     photos = api_get("/dashboard/gallery", params) or []
+    if note_q:
+        photos = [o for o in photos if note_q.lower() in (o.get("manual_note") or "").lower()]
     st.caption(f"{len(photos)} photos")
     cols = st.columns(4)
     for i, o in enumerate(photos):
@@ -159,9 +147,9 @@ elif page == "Photo Gallery":
             thumb = o.get("thumbnail_url") or o.get("image_url")
             if thumb:
                 st.image(thumb, use_container_width=True)
-            sev = SEVERITY_COLORS.get(o["severity"], "⚪")
             st.caption(
-                f"#{o['id']} {sev} {o['severity']} · {o.get('suspected_issue') or '—'}"
+                f"#{o['id']} · `{o.get('event_type', 'observation')}` · "
+                f"{(o.get('manual_note') or '—')[:40]}"
             )
 
 
@@ -169,8 +157,8 @@ elif page == "Photo Gallery":
 # Observation detail
 # --------------------------------------------------------------------------- #
 elif page == "Observation Detail":
-    st.header("Observation Detail")
-    obs_id = st.number_input("Observation ID", min_value=1, step=1)
+    st.header("Field Record Detail")
+    obs_id = st.number_input("Record ID", min_value=1, step=1)
     if st.button("Load") or obs_id:
         o = api_get(f"/observations/{int(obs_id)}")
         if o:
@@ -179,49 +167,28 @@ elif page == "Observation Detail":
                 if o.get("image_url"):
                     st.image(o["image_url"], use_container_width=True)
             with right:
-                sev = SEVERITY_COLORS.get(o["severity"], "⚪")
-                st.subheader(f"#{o['id']} {sev} {o['severity'].upper()}")
-                st.write(f"**Suspected issue:** {o.get('suspected_issue') or '—'}")
-                st.write(f"**Plant condition:** {o['plant_condition']}")
-                st.write(f"**Confidence:** {o['confidence'] * 100:.0f}%")
-                st.write(f"**Symptoms:** {', '.join(o.get('visible_symptoms_json') or []) or '—'}")
-                st.write(f"**AI summary:** {o.get('ai_summary') or '—'}")
-                st.write(f"**Recommended next step:** {o.get('recommended_next_step') or '—'}")
-                st.write(f"**Lot:** {o.get('lot_id') or 'unknown'}")
+                st.subheader(f"Record #{o['id']} · {o.get('event_type', 'observation')}")
+                st.write(f"**📝 Note:** {o.get('manual_note') or '—'}")
+                st.write(f"**Process / treatment:** {o.get('process_type') or '—'}")
+                st.write(f"**Responsible:** {o.get('responsible_person') or '—'}")
+                st.write(f"**Date:** {(o.get('observed_at') or '')[:16] or '—'}")
+                st.write(f"**Lot:** {o.get('lot_id') or '—'} · **Passport:** {o.get('passport_id') or '—'}")
                 if o.get("latitude") is not None:
                     st.write(f"**Location:** {o['latitude']}, {o['longitude']}")
-                st.write(f"**Human verified:** {o['human_verified']}")
-                if o.get("human_correction"):
-                    st.info(f"Correction: {o['human_correction']}")
+                fu = o.get("follow_up_needed")
+                st.write(f"**Follow-up needed:** {'yes' if fu else 'no'}"
+                         + (f" (by {(o.get('follow_up_date') or '')[:10]})" if o.get("follow_up_date") else ""))
+                st.write(f"**Review status:** {o.get('review_status', 'pending_review')}")
+                if o.get("agronomist_notes"):
+                    st.info(f"Agronomist notes: {o['agronomist_notes']}")
 
                 w = o.get("weather")
                 if w:
-                    st.markdown("**Weather context**")
+                    st.markdown("**Weather context** (at time of record)")
                     st.write(
                         f"{w.get('temperature_c')}°C · humidity {w.get('humidity_percent')}% · "
-                        f"recent rain {w.get('recent_rain_mm')} mm · "
-                        f"heat risk {w.get('heat_risk')} · drought risk {w.get('drought_risk')}"
+                        f"recent rain {w.get('recent_rain_mm')} mm"
                     )
-
-                escs = o.get("escalations") or []
-                if escs:
-                    st.markdown("**Escalation history**")
-                    st.dataframe(pd.DataFrame(escs), use_container_width=True)
-
-            st.divider()
-            a, b, c = st.columns(3)
-            if a.button("✅ Verify"):
-                api_patch(f"/observations/{o['id']}/verify", {"human_verified": True})
-                st.success("Verified"); st.cache_data.clear()
-            correction = b.text_input("Correction note")
-            if b.button("💾 Save correction") and correction:
-                api_patch(
-                    f"/observations/{o['id']}/correct", {"human_correction": correction}
-                )
-                st.success("Correction saved"); st.cache_data.clear()
-            if c.button("⚠️ Escalate"):
-                api_post(f"/observations/{o['id']}/escalate")
-                st.warning("Escalation triggered"); st.cache_data.clear()
 
 
 # --------------------------------------------------------------------------- #
@@ -304,11 +271,10 @@ elif page == "Map / Zones":
             cols = st.columns([1, 4])
             if z.get("latest_photo"):
                 cols[0].image(z["latest_photo"], width=110)
-            sev = SEVERITY_COLORS.get(z.get("severity"), "⚪")
             cols[1].markdown(
-                f"{sev} **{z.get('lot_name') or z.get('zone_name') or 'Zone'}** "
-                f"(passport #{z.get('passport_id')}) · status: {z.get('status')}\n\n"
-                f"{z.get('latest_observation') or ''}\n\n_Last inspection: {z.get('inspection_date') or '—'}_"
+                f"📍 **{z.get('lot_name') or z.get('zone_name') or 'Zone'}** "
+                f"(passport #{z.get('passport_id')}) · last event: `{z.get('severity')}`\n\n"
+                f"📝 {z.get('latest_observation') or '—'}\n\n_Last record: {(z.get('inspection_date') or '—')[:16]}_"
             )
     else:
         st.info("No geolocated zones yet. Send a photo with a shared location.")
@@ -413,48 +379,62 @@ elif page == "Before / After":
         else:
             b, a = cmp["before"], cmp["after"]
             cols = st.columns(2)
-            cols[0].caption(f"BEFORE · {b['observed_at']}")
+            cols[0].caption(f"BEFORE · {(b.get('observed_at') or '')[:16]}")
             if b.get("image_url"):
                 cols[0].image(b["image_url"], use_container_width=True)
-            cols[0].write(f"{b.get('diagnosis')} ({b.get('severity')})")
-            cols[1].caption(f"AFTER · {a['observed_at']}")
+            cols[0].write(f"📝 {b.get('manual_note') or '—'} · `{b.get('event_type')}`")
+            cols[1].caption(f"AFTER · {(a.get('observed_at') or '')[:16]}")
             if a.get("image_url"):
                 cols[1].image(a["image_url"], use_container_width=True)
-            cols[1].write(f"{a.get('diagnosis')} ({a.get('severity')})")
-            st.info(cmp.get("change_summary"))
+            cols[1].write(f"📝 {a.get('manual_note') or '—'} · `{a.get('event_type')}`")
+            st.caption(cmp.get("change_summary"))
+            st.caption("Comparison is by human-selected photos — no AI evaluation.")
 
 
 # --------------------------------------------------------------------------- #
-# Validation Queue
+# Field Notes Review (replaces the AI validation queue)
 # --------------------------------------------------------------------------- #
-elif page == "Validation Queue":
-    st.header("🧑‍🌾 Human Validation Queue")
-    st.caption("Low-confidence or high-severity AI observations awaiting a human.")
-    queue = api_get("/observations/queue/needs-review") or []
+elif page == "Field Notes Review":
+    st.header("🧑‍🌾 Field Notes Review")
+    st.caption("Supervisor review of submitted field records — correct the event type, "
+               "add notes, link a process, approve, or request a follow-up photo.")
+    EVENT_TYPES = ["observation", "fertilization", "compost", "irrigation", "pest_treatment",
+                   "herbicide", "weed_control", "maintenance", "follow_up_inspection"]
+    queue = api_get("/observations/queue/review") or []
     if not queue:
-        st.success("Queue empty — nothing awaiting validation.")
+        st.success("Queue empty — all field records reviewed.")
     for o in queue:
         with st.container(border=True):
             cols = st.columns([1, 3])
             thumb = o.get("thumbnail_url") or o.get("image_url")
             if thumb:
                 cols[0].image(thumb, use_container_width=True)
-            sev = SEVERITY_COLORS.get(o["severity"], "⚪")
             cols[1].markdown(
-                f"**#{o['id']}** {sev} `{o['severity']}` · conf {o['confidence']*100:.0f}%\n\n"
-                f"Diagnosis: **{o.get('diagnosis') or '—'}**\n\n{o.get('ai_summary') or ''}"
+                f"**Record #{o['id']}** · `{o.get('event_type', 'observation')}`"
+                f"{' · ⏰ follow-up' if o.get('follow_up_needed') else ''}\n\n"
+                f"📝 {o.get('manual_note') or '_(no note)_'}\n\n"
+                f"_{(o.get('observed_at') or '')[:16]} · lot {o.get('lot_id') or '—'}_"
             )
             with cols[1]:
-                label = st.text_input("Corrected label", key=f"lbl{o['id']}")
+                idx = EVENT_TYPES.index(o["event_type"]) if o.get("event_type") in EVENT_TYPES else 0
+                new_evt = st.selectbox("Event type", EVENT_TYPES, index=idx, key=f"evt{o['id']}")
+                process = st.text_input("Process / treatment", value=o.get("process_type") or "", key=f"pr{o['id']}")
+                notes = st.text_input("Agronomist notes", key=f"an{o['id']}")
                 bc = st.columns(3)
-                if bc[0].button("✅ Confirm", key=f"cf{o['id']}"):
-                    api_patch(f"/observations/{o['id']}/validate", {"status": "confirmed", "validated_by": "dashboard"})
+                if bc[0].button("✅ Approve", key=f"ap{o['id']}"):
+                    api_patch(f"/observations/{o['id']}/review", {
+                        "event_type": new_evt, "process_type": process or None,
+                        "agronomist_notes": notes or None, "approved": True, "reviewed_by": "dashboard"})
                     st.cache_data.clear(); st.rerun()
-                if bc[1].button("✏️ Correct", key=f"co{o['id']}") and label:
-                    api_patch(f"/observations/{o['id']}/validate", {"status": "corrected", "corrected_label": label, "validated_by": "dashboard"})
+                if bc[1].button("💾 Save", key=f"sv{o['id']}"):
+                    api_patch(f"/observations/{o['id']}/review", {
+                        "event_type": new_evt, "process_type": process or None,
+                        "agronomist_notes": notes or None, "reviewed_by": "dashboard"})
                     st.cache_data.clear(); st.rerun()
-                if bc[2].button("🚫 Reject", key=f"rj{o['id']}"):
-                    api_patch(f"/observations/{o['id']}/validate", {"status": "rejected", "validated_by": "dashboard"})
+                if bc[2].button("⏰ Request follow-up", key=f"fu{o['id']}"):
+                    api_patch(f"/observations/{o['id']}/review", {
+                        "event_type": new_evt, "request_followup": True,
+                        "agronomist_notes": notes or None, "reviewed_by": "dashboard"})
                     st.cache_data.clear(); st.rerun()
 
 
