@@ -91,3 +91,49 @@ export const reviewAction = (
   action: "approve" | "reject" | "request-correction",
   body: unknown,
 ) => apiSend("POST", `/api/review/${id}/${action}`, body);
+
+// ---- Executions / timeline / evidence (Phase 3) ----
+export const listExecutions = (status?: string) =>
+  apiGet(`/api/executions${status ? `?compliance_status=${status}` : ""}`);
+export const listTimeline = () => apiGet("/api/timeline");
+export const listPhotos = () => apiGet("/api/photos");
+
+// ---- Public worker completion (token-based; calls the backend DIRECTLY, not
+// the proxy — multipart photo uploads can't pass through the text proxy, and
+// these endpoints are public so no API key is needed). ----
+const DIRECT_BASE =
+  process.env.NEXT_PUBLIC_API_BASE_URL || "https://agavefield-nu.vercel.app";
+
+export async function getCompletionData(token: string): Promise<any> {
+  const res = await fetch(`${DIRECT_BASE}/api/work-orders/complete/${token}/data`, { cache: "no-store" });
+  if (!res.ok) throw new Error(res.status === 404 ? "Invalid or expired link" : `error ${res.status}`);
+  return res.json();
+}
+
+export async function uploadCompletionPhoto(
+  token: string, file: File, workOrderItemId: number,
+  gps?: { lat: number; lon: number; acc?: number },
+): Promise<any> {
+  const fd = new FormData();
+  fd.append("token", token);
+  fd.append("file", file);
+  fd.append("work_order_item_id", String(workOrderItemId));
+  if (gps) {
+    fd.append("gps_latitude", String(gps.lat));
+    fd.append("gps_longitude", String(gps.lon));
+    if (gps.acc != null) fd.append("gps_accuracy", String(gps.acc));
+    fd.append("captured_at", new Date().toISOString());
+  }
+  const res = await fetch(`${DIRECT_BASE}/api/photos/upload`, { method: "POST", body: fd });
+  if (!res.ok) throw new Error(`photo upload failed (${res.status})`);
+  return res.json();
+}
+
+export async function submitCompletion(token: string, payload: unknown): Promise<any> {
+  const res = await fetch(`${DIRECT_BASE}/api/work-orders/complete/${token}/submit`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+  });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(json?.detail || `submit failed (${res.status})`);
+  return json;
+}

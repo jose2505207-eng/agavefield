@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
 import "./globals.css";
-import { AppShell } from "@/components/app-shell";
 
 export const metadata: Metadata = {
   title: "Agave Field — Field Operations",
@@ -8,12 +7,12 @@ export const metadata: Metadata = {
     "Premium field operations & traceability platform for agave production: work orders, evidence, carbon, and review.",
 };
 
+// Root layout is intentionally chrome-free. The admin app shell lives in the
+// (app) route group; the public worker page (/complete/[token]) renders bare.
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
-      <body className="font-sans">
-        <AppShell>{children}</AppShell>
-      </body>
+      <body className="font-sans">{children}</body>
     </html>
   );
 }

@@ -46,3 +46,25 @@ export const DEMO_REVIEW = [
   { id: 91, work_order_id: 1, compliance_status: "pending_review", manual_note: "Compost spread on rows 12–18, soil moist.", actual_surface_area_value: 2.0, actual_surface_area_unit: "ha", actual_carbon_kgco2e: 96.0, carbon_calculation_status: "calculated", gps_latitude: 20.8806, weather_snapshot_status: "captured" },
   { id: 92, work_order_id: 2, compliance_status: "needs_correction", manual_note: "Weeding done, photo blurry.", actual_surface_area_value: 1.2, actual_surface_area_unit: "ha", actual_carbon_kgco2e: null, carbon_calculation_status: "missing_data", gps_latitude: null, weather_snapshot_status: "unavailable" },
 ];
+
+export const DEMO_EXECUTIONS = [
+  ...DEMO_REVIEW,
+  { id: 90, work_order_id: 4, compliance_status: "compliant", manual_note: "Fertilization complete, north block.", actual_surface_area_value: 3.0, actual_surface_area_unit: "ha", actual_carbon_kgco2e: 360.0, carbon_calculation_status: "calculated", gps_latitude: 20.8901, weather_snapshot_status: "captured", submitted_at: "2026-06-15T09:10:00" },
+  { id: 88, work_order_id: 5, compliance_status: "compliant", manual_note: "Drip lines checked, 2 emitters replaced.", actual_surface_area_value: 1.5, actual_surface_area_unit: "ha", actual_carbon_kgco2e: 7.5, carbon_calculation_status: "calculated", gps_latitude: 20.8806, weather_snapshot_status: "captured", submitted_at: "2026-06-14T16:40:00" },
+];
+
+// Demo timeline + evidence for the Evidence Timeline page (API-shaped).
+export const DEMO_TIMELINE = [
+  { id: 1, event_type: "activity_approved", title: "Fertilization approved — TEQ-01", event_datetime: "2026-06-16T10:15:00", carbon_kgco2e: 240 },
+  { id: 2, event_type: "activity_submitted", title: "Compost submitted — TEQ-01", event_datetime: "2026-06-16T08:20:00", carbon_kgco2e: 96 },
+  { id: 3, event_type: "work_order_sent", title: "Weed control sent — TEQ-03", event_datetime: "2026-06-16T07:30:00" },
+  { id: 4, event_type: "correction_requested", title: "Correction requested — TEQ-05", event_datetime: "2026-06-15T18:10:00" },
+  { id: 5, event_type: "work_order_created", title: "Irrigation check created — TEQ-02", event_datetime: "2026-06-15T11:00:00" },
+];
+
+export const DEMO_PHOTOS = [
+  { id: 1, file_url: "https://picsum.photos/seed/agaveA/500/500", thumbnail_url: "https://picsum.photos/seed/agaveA/300/300", lot_id: 1, captured_at: "2026-06-16T08:12:00", gps_source: "device" },
+  { id: 2, file_url: "https://picsum.photos/seed/agaveB/500/500", thumbnail_url: "https://picsum.photos/seed/agaveB/300/300", lot_id: 3, captured_at: "2026-06-16T07:55:00", gps_source: "device" },
+  { id: 3, file_url: "https://picsum.photos/seed/agaveC/500/500", thumbnail_url: "https://picsum.photos/seed/agaveC/300/300", lot_id: 2, captured_at: "2026-06-15T17:30:00", gps_source: "unavailable" },
+  { id: 4, file_url: "https://picsum.photos/seed/agaveD/500/500", thumbnail_url: "https://picsum.photos/seed/agaveD/300/300", lot_id: 5, captured_at: "2026-06-15T16:02:00", gps_source: "device" },
+];

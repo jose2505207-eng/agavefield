@@ -65,6 +65,24 @@ def completion_page(token: str, db: Session = Depends(get_db)):
     return HTMLResponse(page)
 
 
+@router.get("/api/work-orders/complete/{token}/data")
+def completion_data(token: str, db: Session = Depends(get_db)):
+    """Token-validated JSON for the Next.js worker page (public, no admin auth)."""
+    wo = work_order_service.find_by_token(db, token)
+    if not wo:
+        raise HTTPException(404, "Invalid or expired link")
+    return {
+        "work_order": {
+            "code": wo.work_order_code, "title": wo.title,
+            "field_id": wo.field_id, "lot_id": wo.lot_id, "zone_id": wo.zone_id,
+            "due_date": wo.due_date, "status": wo.status,
+            "manual_note_required": wo.manual_note_required,
+            "geolocation_required": wo.geolocation_required,
+        },
+        "items": _items_data(db, wo.id),
+    }
+
+
 @router.post("/api/work-orders/complete/{token}/submit")
 def submit_completion(token: str, payload: SubmitPayload, db: Session = Depends(get_db)):
     wo = work_order_service.find_by_token(db, token)
