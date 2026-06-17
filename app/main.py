@@ -5,10 +5,11 @@ import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
+from app.api.auth import require_reviewer, require_staff
 from app.api import (
     alert_routes,
     assignee_routes,
@@ -16,6 +17,7 @@ from app.api import (
     carbon_routes,
     catalog_routes,
     completion_routes,
+    execution_routes,
     ops_photo_routes,
     review_routes,
     timeline_routes,
@@ -105,13 +107,19 @@ app.include_router(alert_routes.router)
 app.include_router(weather_routes.router)
 app.include_router(report_routes.router)
 app.include_router(map_routes.router)
-# Operations / traceability layer
-app.include_router(assignee_routes.router)
-app.include_router(catalog_routes.router)
-app.include_router(audit_routes.router)
-app.include_router(work_order_routes.router)
-app.include_router(ops_photo_routes.router)
-app.include_router(completion_routes.router)
-app.include_router(review_routes.router)
-app.include_router(timeline_routes.router)
-app.include_router(carbon_routes.router)
+# Operations / traceability layer.
+# RBAC: staff (admin/agronomist) for catalogs/assignees/work-orders/audit;
+# reviewer+ for review/timeline/carbon reads. Open when no API keys are set.
+# Public (token-based): ops_photo upload + mobile completion.
+_staff = [Depends(require_staff)]
+_reviewer = [Depends(require_reviewer)]
+app.include_router(assignee_routes.router, dependencies=_staff)
+app.include_router(catalog_routes.router, dependencies=_staff)
+app.include_router(audit_routes.router, dependencies=_staff)
+app.include_router(work_order_routes.router, dependencies=_staff)
+app.include_router(ops_photo_routes.router)          # upload is token-authorized
+app.include_router(completion_routes.router)          # public worker page (token)
+app.include_router(review_routes.router, dependencies=_reviewer)
+app.include_router(timeline_routes.router, dependencies=_reviewer)
+app.include_router(carbon_routes.router, dependencies=_reviewer)
+app.include_router(execution_routes.router, dependencies=_staff)

@@ -101,6 +101,38 @@ def create_work_order(
     return wo
 
 
+def duplicate_work_order(db: Session, source_id: int, actor: Optional[str] = None) -> Optional[WorkOrder]:
+    """Clone a work order into a fresh draft. Carbon factors are RE-SNAPSHOT from
+    the current catalog (a new plan), not copied from the source's locked values."""
+    src = db.get(WorkOrder, source_id)
+    if not src:
+        return None
+    data = {
+        "title": f"{src.title} (copy)", "description": src.description,
+        "field_id": src.field_id, "lot_id": src.lot_id, "zone_id": src.zone_id,
+        "agave_passport_id": src.agave_passport_id, "season_id": src.season_id,
+        "assigned_to_id": src.assigned_to_id, "assigned_to_email": src.assigned_to_email,
+        "required_photo_evidence_count": src.required_photo_evidence_count,
+        "geolocation_required": src.geolocation_required,
+        "manual_note_required": src.manual_note_required,
+        "weather_capture_required": src.weather_capture_required,
+        "review_required": src.review_required,
+    }
+    items = [{
+        "activity_id": it.activity_id, "product_id": it.product_id, "instructions": it.instructions,
+        "planned_surface_area_value": it.planned_surface_area_value,
+        "planned_surface_area_unit": it.planned_surface_area_unit,
+        "planned_dose_value": it.planned_dose_value, "planned_dose_unit": it.planned_dose_unit,
+        "planned_total_product_value": it.planned_total_product_value,
+        "planned_total_product_unit": it.planned_total_product_unit,
+        "required_photo_count": it.required_photo_count,
+        "requires_geolocation": it.requires_geolocation,
+        "requires_weather_snapshot": it.requires_weather_snapshot,
+        "requires_manual_note": it.requires_manual_note,
+    } for it in get_items(db, source_id)]
+    return create_work_order(db, data, items, actor=actor)
+
+
 def list_work_orders(db: Session, status: Optional[str] = None, limit: int = 200) -> list[WorkOrder]:
     stmt = select(WorkOrder).where(WorkOrder.deleted_at.is_(None))
     if status:

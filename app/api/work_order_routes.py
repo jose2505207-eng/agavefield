@@ -62,6 +62,16 @@ def update_work_order(work_order_id: int, payload: WorkOrderUpdate, db: Session 
     return wo
 
 
+@router.post("/{work_order_id}/duplicate", response_model=WorkOrderDetail, status_code=201)
+def duplicate_work_order(work_order_id: int, db: Session = Depends(get_db)):
+    wo = work_order_service.duplicate_work_order(db, work_order_id)
+    if not wo:
+        raise HTTPException(404, "Work order not found")
+    db.commit()
+    db.refresh(wo)
+    return _detail(db, wo)
+
+
 @router.post("/{work_order_id}/send")
 def send_work_order(work_order_id: int, db: Session = Depends(get_db)):
     from app.config import settings

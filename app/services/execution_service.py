@@ -26,6 +26,27 @@ from app.services import audit_service, carbon_service, ops_weather_service
 logger = logging.getLogger("agave.execution")
 
 
+def override_carbon(db: Session, execution_id: int, *, value: float, reason: str,
+                    user: str = None) -> dict | None:
+    """Manual carbon override with reason + user + timestamp (audit-logged).
+    Preserves the originally calculated value; only the override fields change."""
+    er = db.get(ExecutionRecord, execution_id)
+    if not er:
+        return None
+    old = er.carbon_override_value
+    er.carbon_override_value = value
+    er.carbon_override_reason = reason
+    er.carbon_override_user = user
+    er.carbon_override_at = datetime.utcnow()
+    db.flush()
+    audit_service.log(db, entity_type="execution_record", entity_id=er.id, action="override_carbon",
+                      old_values={"carbon_override_value": old},
+                      new_values={"carbon_override_value": value, "calculated": er.actual_carbon_kgco2e},
+                      changed_by=user, reason=reason)
+    return {"execution_record_id": er.id, "override_value": value,
+            "calculated_value": er.actual_carbon_kgco2e}
+
+
 def submit_execution(db: Session, wo: WorkOrder, payload) -> dict:
     # Capture one weather snapshot for the submission location (rain-first).
     weather_snap, weather_status = ops_weather_service.capture_snapshot(

@@ -330,6 +330,12 @@ class ReviewAction(BaseModel):
     correction_due_date: Optional[datetime] = None
 
 
+class CarbonOverrideRequest(BaseModel):
+    value: float
+    reason: str = Field(..., min_length=1)
+    user: Optional[str] = None
+
+
 class ExecutionRead(BaseModel):
     id: int
     work_order_id: int

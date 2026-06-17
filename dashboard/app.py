@@ -15,6 +15,10 @@ import requests
 import streamlit as st
 
 API_BASE_URL = os.environ.get("API_BASE_URL", "http://localhost:8000")
+# Sent as X-API-Key so the dashboard works when the API enforces RBAC (prod).
+# Leave unset for local/open mode. Use an admin/agronomist key for full access.
+API_KEY = os.environ.get("API_KEY", "")
+_HEADERS = {"X-API-Key": API_KEY} if API_KEY else {}
 
 st.set_page_config(page_title="Agave Field Copilot", page_icon="🌵", layout="wide")
 
@@ -30,7 +34,7 @@ SEVERITY_COLORS = {
 @st.cache_data(ttl=15)
 def api_get(path: str, params: dict | None = None):
     try:
-        resp = requests.get(f"{API_BASE_URL}{path}", params=params or {}, timeout=20)
+        resp = requests.get(f"{API_BASE_URL}{path}", params=params or {}, headers=_HEADERS, timeout=20)
         resp.raise_for_status()
         return resp.json()
     except Exception as exc:
@@ -39,13 +43,13 @@ def api_get(path: str, params: dict | None = None):
 
 
 def api_patch(path: str, payload: dict):
-    resp = requests.patch(f"{API_BASE_URL}{path}", json=payload, timeout=20)
+    resp = requests.patch(f"{API_BASE_URL}{path}", json=payload, headers=_HEADERS, timeout=20)
     resp.raise_for_status()
     return resp.json()
 
 
 def api_post(path: str, payload: dict | None = None):
-    resp = requests.post(f"{API_BASE_URL}{path}", json=payload or {}, timeout=30)
+    resp = requests.post(f"{API_BASE_URL}{path}", json=payload or {}, headers=_HEADERS, timeout=30)
     resp.raise_for_status()
     return resp.json()
 

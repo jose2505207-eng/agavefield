@@ -62,6 +62,12 @@ class Settings(BaseSettings):
     # --- Operations / work orders ---
     secret_key: str = "dev-insecure-change-me"  # token hashing; override in prod
     app_base_url: str = "http://localhost:8000"  # used for secure work-order links
+
+    # Role-based access (API keys). If ALL are empty, auth is OPEN (dev mode);
+    # set at least one in production to enforce RBAC on the ops admin endpoints.
+    admin_api_key: str = ""
+    agronomist_api_key: str = ""
+    reviewer_api_key: str = ""
     work_order_link_expiry_days: int = 14
 
     # Email delivery for work-order links.
