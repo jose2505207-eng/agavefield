@@ -20,6 +20,7 @@ from app.api import (
     execution_routes,
     ops_photo_routes,
     review_routes,
+    system_routes,
     timeline_routes,
     work_order_routes,
     dashboard_routes,
@@ -123,3 +124,4 @@ app.include_router(review_routes.router, dependencies=_reviewer)
 app.include_router(timeline_routes.router, dependencies=_reviewer)
 app.include_router(carbon_routes.router, dependencies=_reviewer)
 app.include_router(execution_routes.router, dependencies=_staff)
+app.include_router(system_routes.router, dependencies=_staff)

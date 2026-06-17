@@ -67,6 +67,7 @@ page = st.sidebar.radio(
         "Carbon Dashboard",
         "Evidence Gallery",
         "Audit Log",
+        "Settings / Status",
         # --- Field records / agronomy ---
         "Agave Passports",
         "Map / Zones",
@@ -698,3 +699,37 @@ elif page == "Audit Log":
                 st.caption(f"Reason: {r['reason']}")
             if r.get("new_values"):
                 st.caption(f"New: {r['new_values']}")
+
+
+elif page == "Settings / Status":
+    st.header("⚙️ Settings / Environment Status")
+    s = api_get("/api/system/status")
+    if not s:
+        st.error("Could not load status (is the API reachable, and is your API_KEY set if RBAC is on?).")
+    else:
+        ready = s.get("go_live_ready")
+        st.success("✅ Go-live ready") if ready else st.warning("⚠️ Not go-live ready yet — see checklist below")
+        m = st.columns(4)
+        m[0].metric("Environment", s.get("app_env"))
+        m[1].metric("DB connected", "yes" if s["database"]["connected"] else "NO")
+        m[2].metric("RBAC enforced", "yes" if s.get("rbac_enforced") else "open")
+        m[3].metric("AI image analysis", "on" if s.get("ai_image_analysis_enabled") else "off")
+
+        def _row(label, ok, extra=""):
+            st.markdown(f"{'✅' if ok else '⚠️'} **{label}** — {extra}")
+        _row("Storage", s["storage"]["configured"], f"provider: {s['storage']['provider']}")
+        _row("Email", s["email"]["configured"],
+             f"provider: {s['email']['provider']} ({'live' if s['email']['live'] else 'console/dev'})")
+        _row("Weather", True, f"provider: {s['weather']['provider']}")
+        _row("RBAC", s.get("rbac_enforced"),
+             "enforced" if s.get("rbac_enforced") else "OPEN — set API keys in production")
+        st.subheader("Records")
+        st.dataframe(pd.DataFrame([s["counts"]]), use_container_width=True)
+        if not ready:
+            st.subheader("Go-live checklist")
+            st.markdown(
+                "- Add real **products** + **activities** (with carbon factors)\n"
+                "- Configure **email** (SMTP/SendGrid/Resend) for real work-order links\n"
+                "- Set **RBAC API keys** in production env\n"
+                "- Confirm **storage** bucket configured"
+            )
