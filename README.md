@@ -1,457 +1,896 @@
-# 🌵 Agave Field Copilot
+# 🌵 Agave Field
 
-A **human-centered field record system** for agronomists working in the agave
-industry in Jalisco, Mexico.
+**Agave Field** is an enterprise-style field operations workbook for agave agriculture.
 
-A field worker sends a photo of an agave plant, row, soil or lot condition
-through **Telegram**. The system stores the photo as **historical evidence**,
-captures a **manual note**, an **event type** (observation, fertilization,
-irrigation, pest treatment, etc.), an optional **process/treatment**, the
-**responsible person**, and a **follow-up**, links it to an **Agave Passport /
-Lot / Zone** timeline, and surfaces it on a **dashboard with photos** plus a
-**Field Notes Review** workflow for supervisors.
+It helps agronomists, field supervisors, and workers plan, assign, execute, review, and trace agricultural work in a structured way.
 
-> **MVP scope (important):** photos are treated as **historical evidence, not
-> AI-analyzed inputs**. **No LLM or computer-vision model is called on upload.**
-> The app is fully usable **without any AI API key**. AI image analysis exists
-> only behind the feature flag `ENABLE_AI_IMAGE_ANALYSIS` (**off by default**)
-> and is reserved for a future version, once enough human-labeled history
-> exists. Core behavior: **Photo + Human Note + Process + Date + Follow-up =
-> Reliable Agave History.**
+The goal is simple:
 
----
+> Make field operations feel as organized and reliable as Excel, but easier to use, mobile-friendly, auditable, and ready for real agricultural traceability.
 
-## Table of contents
-- [Architecture](#architecture)
-- [Project structure](#project-structure)
-- [Setup](#setup)
-- [Environment variables](#environment-variables)
-- [Run with Docker Compose](#run-with-docker-compose)
-- [Run locally without Docker](#run-locally-without-docker)
-- [Create & configure a Telegram bot](#create--configure-a-telegram-bot)
-- [Configure WhatsApp later](#configure-whatsapp-later)
-- [How Hermes works](#how-hermes-works)
-- [How weather enrichment works](#how-weather-enrichment-works)
-- [How escalation rules work](#how-escalation-rules-work)
-- [The dashboard](#the-dashboard)
-- [API reference](#api-reference)
-- [Testing](#testing)
-- [Safety notes](#safety-notes)
-- [Roadmap](#roadmap)
+Agave Field is designed for teams that need to know:
+
+- What work was planned
+- Who was assigned
+- Where the work happened
+- What products were used
+- What evidence was collected
+- What still needs review
+- What was approved
+- What changed over time
+- What the carbon footprint estimate looks like
+
+This project started as a human-centered field record system for agave operations in Jalisco, Mexico, and is evolving into a production-ready field operations platform.
 
 ---
 
-## Architecture
+## Demo Login
 
-```
-                         ┌──────────────────────────────────────────────┐
-   Telegram  ─┐          │                 FastAPI backend               │
-   WhatsApp  ─┼─ webhook ▶  /webhooks/telegram  /webhooks/whatsapp        │
-              │          │            │                                   │
-              │          │            ▼                                   │
-              │          │     image_service ──▶ storage_client (local/S3)│
-              │          │            │                                   │
-              │          │            ▼                                   │
-              │          │      ┌───────────── HERMES AGENT ───────────┐  │
-              │          │      │  tool_analyze_image  → vision_client  │  │
-              │          │      │  tool_match_lot      → lot_matching   │  │
-              │          │      │  tool_fetch_weather  → weather_service│  │
-              │          │      │  tool_create_obs     → observation_svc│  │
-              │          │      │  tool_maybe_escalate → escalation_svc │  │
-              │          │      └───────────────────┬───────────────────┘  │
-              │          │                          ▼                      │
-   reply  ◀───┴──────────│   PostgreSQL: users, farms, lots,              │
-   + buttons             │   field_observations, model_outputs,          │
-                         │   weather_snapshots, escalations              │
-                         │                          │                      │
-   Supervisors ◀── escalation (WhatsApp preferred,  │                      │
-                   Telegram fallback)               ▼                      │
-                         │   /dashboard/* endpoints ──▶ Streamlit dashboard│
-                         └──────────────────────────────────────────────┘
+The app includes a demo account so the workflow can be tested immediately.
+
+```txt
+Username: DEMO
+Password: DEMO
 ```
 
-**Modularity:** messaging channels, the vision model, storage, and weather are
-all behind small abstractions (`integrations/`), so each can be swapped or
-extended (e.g. a future agave-specific YOLO classifier) without touching the
-agent or the API.
+Demo mode includes realistic sample data for:
+
+- Organization
+- Seasons
+- Ranches / farms
+- Lots / plots
+- Activities
+- Products
+- Workers
+- Evidence rules
+- Carbon factors
+- Work orders
+- Review queue
+- Reports
+
+The demo account is useful for testing and presentations. It is not intended to replace real production authentication.
 
 ---
 
-## Project structure
+## Why Agave Field Exists
 
-```
-app/
-  main.py                 FastAPI app, /health, static /media mount, lifespan
-  config.py               Env-driven settings (graceful defaults)
-  db.py                   Engine, session, get_db dependency
-  models/
-    database.py           SQLAlchemy ORM tables
-    schemas.py            Pydantic schemas + strict HermesOutput contract
-  agents/
-    hermes_agent.py       Orchestrates the full photo→evidence pipeline
-    prompts.py            Vision system prompt (safety rules baked in)
-    tools.py              Tool layer Hermes calls (wraps services)
-  services/
-    observation_service.py  Create/verify/correct/query observations
-    weather_service.py       Open-Meteo enrichment + risk flags
-    image_service.py         Download, thumbnail, store
-    escalation_service.py    Rules + cooldown + WhatsApp/Telegram dispatch
-    lot_matching_service.py  Point-in-polygon / nearest-centroid matching
-    dashboard_service.py     Aggregations for the dashboard
-  integrations/
-    telegram_client.py    Telegram Bot API (send, getFile, buttons)
-    whatsapp_client.py    WhatsApp Cloud API (optional)
-    vision_client.py      OpenAI-compatible client + offline stub
-    storage_client.py     Local + S3-compatible storage
-  api/
-    telegram_routes.py    Telegram webhook + button callbacks
-    whatsapp_routes.py    WhatsApp verify + inbound
-    observation_routes.py CRUD + verify/correct/escalate
-    dashboard_routes.py   summary, gallery, lot-risk, map-points
-    lot_routes.py         Lots CRUD + lot observations
-dashboard/app.py          Streamlit dashboard (photos, filters, map)
-scripts/seed.py           Seed a sample Jalisco farm + lots
-alembic/                  Migration scaffolding (autogenerate-ready)
-tests/                    pytest suite (runs offline on SQLite)
-Dockerfile, docker-compose.yml, requirements.txt, .env.example
-```
+Agricultural field work is often managed through a mix of spreadsheets, WhatsApp messages, photos, paper notes, and memory.
+
+That creates problems:
+
+- Work orders can get lost.
+- Photos are scattered across different phones and chats.
+- Product usage is hard to trace.
+- Supervisors may not know what is completed or still pending.
+- Evidence is difficult to review later.
+- Carbon footprint data is hard to calculate after the fact.
+- Reports take too much manual work.
+- Audits depend on incomplete information.
+
+Agave Field brings all of that into one structured workflow.
+
+It does not replace the agronomist.
+
+It gives the agronomist a stronger operating system.
 
 ---
 
-## Setup
+## Product Vision
 
-Requirements: Python 3.12+, and Docker (optional but recommended for Postgres).
+Agave Field is inspired by the reliability of Excel, but designed for real field operations.
+
+The app is built around an **Operations Workbook**, where every row represents a work order, planned activity, or field execution record.
+
+Each record can include:
+
+- Ranch or farm
+- Lot or plot
+- Season
+- Activity
+- Product
+- Dose
+- Assigned worker
+- Due date
+- Required evidence
+- GPS status
+- Weather snapshot
+- Carbon footprint estimate
+- Review status
+- Approval history
+- Audit trail
+
+The main feeling of the product should be:
+
+> “This is a serious operational system. Nothing gets lost.”
+
+---
+
+## Who This Is For
+
+Agave Field is designed for:
+
+- Agronomists
+- Field supervisors
+- Field workers
+- Agave producers
+- Distilleries
+- Agricultural operations teams
+- Sustainability teams
+- Auditors
+- Traceability and compliance teams
+
+Although the first version is focused on agave agriculture, the workflow can be adapted to other crops and field operations.
+
+---
+
+## Core Workflow
+
+Agave Field follows a simple operational cycle.
+
+---
+
+### 1. Set Up the Catalogs
+
+Before creating work orders, the organization defines its master data.
+
+Catalogs include:
+
+- Ranches / farms
+- Lots / plots
+- Activities
+- Products
+- Workers / assignees
+- Seasons
+- Carbon factors
+- Evidence rules
+
+This keeps the system structured.
+
+Instead of typing everything manually every time, users select from approved catalogs. This reduces errors and makes reporting cleaner.
+
+Example:
+
+A supervisor does not type “fertilization” in ten different ways. They select the approved activity from the catalog.
+
+That makes the data easier to review, filter, export, and audit.
+
+---
+
+### 2. Create a Work Order
+
+An agronomist or supervisor creates a work order from the Operations Workbook.
+
+A work order can define:
+
+- What activity needs to be done
+- Where it needs to happen
+- Which ranch and lot it belongs to
+- Who is assigned
+- What product is allowed
+- What dose should be used
+- What evidence is required
+- Whether GPS is required
+- Whether photos are required
+- Whether review is required
+- The estimated carbon footprint
+- The due date
+
+Example:
+
+> Apply organic fertilizer in Lot A12 at Rancho Los Altos before Friday. Photos and GPS are required. The work must be reviewed before closing.
+
+---
+
+### 3. Assign a Worker
+
+Each work order can be assigned to a worker.
+
+Workers can have multiple contact methods:
+
+- Email
+- Phone
+- Preferred contact method
+- Preferred language
+
+The system uses the worker’s preferred contact method when possible.
+
+If the preferred method is missing, the system can fall back to another available method.
+
+For example:
+
+- If the worker prefers email and has an email address, the app prepares an email message.
+- If the worker prefers phone or WhatsApp and has a phone number, the app prepares a phone-based message.
+- If no real provider is configured, the app uses Demo Outbox.
+
+---
+
+### 4. Send the Work Order Link
+
+Agave Field can generate an execution link for the assigned worker.
+
+The link opens a mobile-friendly page where the worker can complete the task.
+
+Example English message:
+
+```txt
+Hello Juan, you have a new Agave Field work order: Fertilization at Rancho Los Altos / Lot A12. Open your field task here: [execution link]
+```
+
+Example Spanish message:
+
+```txt
+Hola Juan, tienes una nueva orden de trabajo en Agave Field: Fertilización en Rancho Los Altos / Lote A12. Abre tu tarea de campo aquí: [enlace]
+```
+
+The message language can follow the worker’s preferred language.
+
+---
+
+### 5. Complete the Task in the Field
+
+The worker opens the execution link on a phone.
+
+The mobile execution page shows only the work order assigned to that worker.
+
+The worker can complete the required steps and provide field evidence.
+
+Evidence can include:
+
+- Checklist completion
+- Photos
+- GPS location
+- Notes
+- Product usage
+- Weather snapshot
+- Completion status
+
+The goal is to make field execution simple, clear, and hard to lose.
+
+---
+
+### 6. Submit for Review
+
+After the worker completes the task, the work order can be submitted.
+
+Submitted work appears in the **Review Queue**.
+
+The agronomist or supervisor can then:
+
+- Approve the work
+- Reject the work
+- Request corrections
+- Review missing evidence
+- Check photos and GPS
+- Confirm product and dose information
+- Review carbon footprint estimates
+
+This creates a clean separation between field execution and agronomic approval.
+
+---
+
+### 7. Record the Audit Trail
+
+Agave Field is designed with traceability in mind.
+
+Important actions can be recorded in an audit trail, including:
+
+- Work order created
+- Work order edited
+- Worker assigned
+- Execution link generated
+- Execution link sent
+- Evidence submitted
+- Review requested
+- Work approved
+- Work rejected
+- Work closed
+- Catalog record created
+- Catalog record edited
+- Catalog record archived
+
+This helps answer important questions:
+
+- Who changed this?
+- When was it changed?
+- What was changed?
+- What was the previous value?
+- Who approved the work?
+
+This is important for operational discipline, compliance, sustainability reporting, and accountability.
+
+---
+
+### 8. Review Reports and Carbon Data
+
+Agave Field includes reporting foundations for:
+
+- Work orders by season
+- Work orders by ranch
+- Work orders by lot
+- Pending activities
+- Completed activities
+- Product usage
+- Evidence completeness
+- Review status
+- Carbon footprint totals
+
+Carbon tracking is part of the core workflow.
+
+Carbon estimates can be calculated based on:
+
+- Activity type
+- Product used
+- Dose
+- Area covered
+- Carbon factor
+- Operational assumptions
+
+This allows the team to build field-level sustainability records as work is completed, instead of trying to calculate everything later.
+
+---
+
+## Main Modules
+
+### Operations
+
+The main workbook view.
+
+This is where users can see, filter, search, and manage field work orders.
+
+The Operations page is designed to feel like a professional spreadsheet-style control room.
+
+---
+
+### Work Orders
+
+Used to create and manage specific field tasks.
+
+Each work order can include:
+
+- Assignment
+- Activity details
+- Product information
+- Due dates
+- Required evidence
+- Status
+- Review rules
+
+---
+
+### Catalogs
+
+Catalogs are the master data of the system.
+
+They keep the app clean, structured, and consistent.
+
+Catalogs include:
+
+- Ranches / farms
+- Lots / plots
+- Activities
+- Products
+- Workers / assignees
+- Carbon factors
+- Evidence rules
+- Seasons
+
+Each catalog supports a structured workflow such as:
+
+- View records
+- Search records
+- Add records
+- Edit records
+- Archive records
+- Show archived records
+- Validate required fields
+
+---
+
+### Evidence
+
+Evidence stores proof of field execution.
+
+Evidence can include:
+
+- Photos
+- GPS location
+- Notes
+- Weather snapshot
+- Signatures
+- Documents
+
+The purpose is to create reliable field history.
+
+---
+
+### Review Queue
+
+The Review Queue shows submitted work that needs approval.
+
+This helps agronomists focus on what needs attention instead of searching through messages, spreadsheets, and photo galleries.
+
+---
+
+### Reports
+
+Reports help the team understand what happened across the operation.
+
+Reports can show:
+
+- Activity totals
+- Product usage
+- Pending work
+- Completed work
+- Evidence completeness
+- Review progress
+- Carbon estimates
+
+---
+
+### Carbon
+
+The Carbon module helps estimate and review the environmental footprint of field activities.
+
+This is especially important for agricultural traceability, sustainability programs, and future reporting requirements.
+
+---
+
+### Settings
+
+Settings allow the organization to manage configuration such as:
+
+- Organization name
+- User profile
+- Language preference
+- Timezone
+- Default season
+- Integration status
+- Demo/live mode visibility
+- API configuration foundations
+
+---
+
+## Language Support
+
+Agave Field includes a foundation for English and Spanish.
+
+The goal is to make the app usable for teams where supervisors, agronomists, and field workers may prefer different languages.
+
+Supported language foundation:
+
+- English
+- Spanish
+
+---
+
+## Worker Contact System
+
+Each worker can have multiple contact methods.
+
+Worker fields can include:
+
+- Name
+- Role
+- Email
+- Phone
+- Preferred contact method
+- Language
+- Status
+- Notes
+
+The system decides how to prepare the work order link based on the worker’s available contact information.
+
+Priority example:
+
+1. Use the preferred contact method.
+2. If the preferred method is missing, fall back to another available method.
+3. If no real provider is configured, create a Demo Outbox message.
+
+---
+
+## Demo Outbox
+
+The Demo Outbox is used when real email, WhatsApp, or SMS providers are not configured.
+
+Instead of failing, the app creates a preview of the message.
+
+This allows users to:
+
+- Copy the message
+- Copy the execution link
+- Test the workflow
+- Understand what would be sent in production
+
+This keeps demo mode honest.
+
+The app does not pretend to send real messages when no provider is connected.
+
+---
+
+## Demo vs Production
+
+### Demo Mode
+
+Demo mode is useful for testing, presentations, and early feedback.
+
+It may use:
+
+- Seeded demo data
+- Demo login
+- Mock integrations
+- Demo Outbox
+- Local or session persistence
+- Placeholder weather
+- Placeholder evidence storage
+
+### Production Mode
+
+Production mode should use:
+
+- Real authentication
+- Real database
+- Secure file storage
+- Real email, WhatsApp, or SMS provider
+- Real weather API
+- Secure API key management
+- Role-based access control
+- Production audit logging
+- Backup and monitoring
+
+The current demo can run without production integrations.
+
+When keys are missing, the app should fall back to demo behavior instead of crashing.
+
+---
+
+## Production Integrations
+
+Agave Field is designed to support production integrations such as:
+
+- Supabase / Postgres database
+- Object storage for photos
+- Weather API
+- Email provider
+- WhatsApp Cloud API
+- SMS provider
+- Authentication provider
+- Role-based access control
+- Secure server-side API key storage
+
+---
+
+## Environment Variables
+
+Create a `.env.local` file based on `.env.example`.
+
+Example:
+
+```txt
+NEXT_PUBLIC_APP_URL=
+
+DATABASE_URL=
+
+NEXT_PUBLIC_SUPABASE_URL=
+NEXT_PUBLIC_SUPABASE_ANON_KEY=
+SUPABASE_SERVICE_ROLE_KEY=
+
+WEATHER_API_KEY=
+
+EMAIL_PROVIDER_API_KEY=
+
+WHATSAPP_ACCESS_TOKEN=
+WHATSAPP_PHONE_NUMBER_ID=
+
+TELEGRAM_BOT_TOKEN=
+
+ENCRYPTION_KEY=
+```
+
+Important:
+
+Do not commit real secrets to GitHub.
+
+Production secrets should be stored securely in the deployment platform, such as Vercel environment variables.
+
+---
+
+## Local Development
+
+Install dependencies:
 
 ```bash
-cp .env.example .env          # then edit as needed (works as-is for a local demo)
+npm install
 ```
 
-The MVP **runs with zero credentials**: no vision key → an offline stub
-analyzer (conservative, always "needs human review"); no Telegram/WhatsApp
-token → sends are logged instead of delivered.
-
----
-
-## Environment variables
-
-| Variable | Purpose | Default |
-|---|---|---|
-| `APP_ENV` | Environment name | `development` |
-| `DATABASE_URL` | PostgreSQL DSN (SQLite works for tests) | local Postgres |
-| `PUBLIC_BASE_URL` | Base URL used to build `/media` image links | `http://localhost:8000` |
-| `TELEGRAM_BOT_TOKEN` | Telegram bot token (BotFather) | _empty_ |
-| `TELEGRAM_WEBHOOK_SECRET` | Optional secret validated on webhook | _empty_ |
-| `WHATSAPP_ACCESS_TOKEN` | WhatsApp Cloud API token | _empty (disabled)_ |
-| `WHATSAPP_PHONE_NUMBER_ID` | WhatsApp sender phone id | _empty_ |
-| `WHATSAPP_VERIFY_TOKEN` | Webhook verification token | _empty_ |
-| `WHATSAPP_DEFAULT_ESCALATION_RECIPIENTS` | Comma-separated phone numbers | _empty_ |
-| `VISION_PROVIDER` | `openai_compatible` (falls back to stub) | `openai_compatible` |
-| `VISION_API_KEY` | Vision model key; blank → offline stub | _empty_ |
-| `VISION_BASE_URL` | OpenAI-compatible base URL | `https://api.openai.com/v1` |
-| `VISION_MODEL` | Multimodal model id (AI path only) | `gpt-4o-mini` |
-| `ENABLE_AI_IMAGE_ANALYSIS` | Gate for AI image analysis. **Keep `false`** in the MVP | `false` |
-| `STORAGE_PROVIDER` | `local` or `s3` | `local` |
-| `STORAGE_*` | S3 bucket/keys/endpoint | _empty_ |
-| `WEATHER_PROVIDER` | `auto` / `mock` / `openmeteo` / `openweather` | `auto` |
-| `WEATHER_API_KEY` | Required only for `openweather` | _empty_ |
-| `ESCALATION_COOLDOWN_HOURS` | Dedup window per lot+issue | `24` |
-
-Secrets are never hard-coded; everything is read from the environment.
-
----
-
-## Run with Docker Compose
+Run the development server:
 
 ```bash
-cp .env.example .env
-docker compose up --build
+npm run dev
 ```
 
-Services:
-- **api** → http://localhost:8000 (Swagger docs at `/docs`)
-- **dashboard** → http://localhost:8501
-- **db** → PostgreSQL + PostGIS on `localhost:5432`
+Open the app:
 
-Tables are auto-created on startup (`init_db()`). For schema evolution use
-Alembic (below).
+```txt
+http://localhost:3000
+```
 
----
-
-## Run locally without Docker
+Build the app:
 
 ```bash
-python -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-
-# Point DATABASE_URL at a Postgres instance, or use SQLite for a quick demo:
-export DATABASE_URL="sqlite:///./agave.db"
-
-uvicorn app.main:app --reload --port 8000        # API + /docs
-python -m scripts.seed                            # optional sample farm/lots
-API_BASE_URL=http://localhost:8000 streamlit run dashboard/app.py   # dashboard
+npm run build
 ```
 
-### Alembic migrations (optional)
-```bash
-alembic revision --autogenerate -m "init schema"
-alembic upgrade head
-```
-
----
-
-## Create & configure a Telegram bot
-
-1. In Telegram, message **@BotFather** → `/newbot` → choose a name & username.
-2. Copy the token into `.env` as `TELEGRAM_BOT_TOKEN`.
-3. Expose your local server (e.g. `ngrok http 8000`) to get an HTTPS URL.
-4. Register the webhook (optionally with a secret matching
-   `TELEGRAM_WEBHOOK_SECRET`):
+Run linting:
 
 ```bash
-curl "https://api.telegram.org/bot<TOKEN>/setWebhook" \
-  -d "url=https://<your-ngrok>.ngrok.io/webhooks/telegram" \
-  -d "secret_token=<TELEGRAM_WEBHOOK_SECRET>"
+npm run lint
 ```
 
-5. Send a **photo** (optionally with a caption and shared location) to the bot.
-   It replies with a summary and the action buttons:
-   **Confirm · Change lot · Mark false positive · Escalate · Request location**.
-
----
-
-## Configure WhatsApp later
-
-WhatsApp is fully optional and gated behind env vars.
-
-1. Create a Meta app with the **WhatsApp** product; get a `PHONE_NUMBER_ID` and
-   a (permanent) access token.
-2. Set `WHATSAPP_ACCESS_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`,
-   `WHATSAPP_VERIFY_TOKEN`, and `WHATSAPP_DEFAULT_ESCALATION_RECIPIENTS`.
-3. Configure the webhook callback URL to `…/webhooks/whatsapp` and the verify
-   token to match `WHATSAPP_VERIFY_TOKEN`. The `GET` handshake is handled.
-4. Inbound text/image messages create observations; escalations now prefer
-   WhatsApp, with Telegram as the fallback.
-
----
-
-## How Hermes works
-
-`app/agents/hermes_agent.py` runs one inbound image through a tool pipeline
-(`app/agents/tools.py`):
-
-1. **Analyze image** — `vision_client.analyze()` returns raw JSON, validated
-   against the strict `HermesOutput` Pydantic schema. **Nothing unvalidated is
-   ever written to the database.**
-2. **Persist observation** — `observation_service.create_observation()` runs
-   **lot matching** and **weather enrichment** inside the same transaction, and
-   writes an **immutable `model_outputs` row** (never overwritten).
-3. **Determine missing fields** — e.g. no lot match → ask for the lot; no GPS →
-   ask for location.
-4. **Escalation decision** — delegated to the escalation engine (rules +
-   cooldown).
-5. **Reply** — a concise summary + recommended next step + action buttons.
-
-The vision prompt (`app/agents/prompts.py`) instructs the model to report only
-observable symptoms, use uncertainty, never give a final diagnosis, and never
-recommend any chemical product or dosage.
-
-**Swapping the model:** point `VISION_*` at any OpenAI-compatible multimodal
-endpoint (OpenAI, Azure, a local vLLM, or a Claude-compatible gateway). A future
-agave-specific classifier just implements the same `analyze(...) -> dict`
-contract.
-
----
-
-## How weather enrichment works
-
-`app/services/weather_service.py` calls **Open-Meteo** (no API key) for current
-conditions plus 7-day precipitation. It normalizes temperature, humidity,
-precipitation, wind, and recent rain, and derives simple **heat_risk** and
-**drought_risk** flags. A `weather_snapshots` row is linked to the observation.
-Network failures return `None` so the pipeline never breaks.
-
----
-
-## How escalation rules work
-
-`app/services/escalation_service.py` escalates automatically when **any** of:
-
-- severity is **high** or **critical**;
-- `escalation_recommended` is true **and** confidence ≥ **0.75**;
-- the same lot has **3+ medium**-severity observations within **10 days**;
-- the caption contains urgent terms (`urgent`, `urgente`, `escalar`,
-  `plaga fuerte`, `riesgo alto`, `se está extendiendo`, `revisar hoy`);
-- a human presses **Escalate**.
-
-**Anti-spam:** a duplicate escalation for the same **lot + suspected issue** is
-suppressed within `ESCALATION_COOLDOWN_HOURS`. The message includes severity,
-lot, suspected issue, AI summary, recommended next step, image link, timestamp,
-and location. Dispatch prefers **WhatsApp**; falls back to **Telegram**. Every
-attempt is recorded in `escalations`.
-
----
-
-## The dashboard
-
-Streamlit app (`dashboard/app.py`) — **photos first**:
-
-- **Overview** — totals, severity & issue breakdowns, needs-review count,
-  escalations sent, human verification rate, recent photos, lot risk ranking.
-- **Photo Gallery** — thumbnails filtered by lot, severity, issue, date range.
-- **Observation Detail** — large photo, AI summary, symptoms, severity,
-  confidence, weather, location, lot, verification status, correction notes,
-  escalation history, plus Verify / Correct / Escalate actions.
-- **Lots** — code, farm, recent observations, photo history, severity
-  breakdown, repeated issues, last inspection.
-- **Map** — geolocated observations with severity and summary.
-
----
-
-## API reference
-
-```
-GET    /health
-
-POST   /webhooks/telegram
-GET    /webhooks/whatsapp           (verification handshake)
-POST   /webhooks/whatsapp
-
-GET    /observations                ?severity&suspected_issue&lot_id&needs_review
-GET    /observations/{id}
-POST   /observations                (runs the Hermes pipeline on image_url)
-PATCH  /observations/{id}/verify
-PATCH  /observations/{id}/correct
-POST   /observations/{id}/escalate
-
-GET    /dashboard/summary
-GET    /dashboard/recent-observations
-GET    /dashboard/gallery
-GET    /dashboard/lot-risk-ranking
-GET    /dashboard/map-points
-
-GET    /lots
-POST   /lots
-GET    /lots/{id}
-GET    /lots/{id}/observations
-
-# --- Field-intelligence modules (v0.2) ---
-GET    /api/passports
-POST   /api/passports
-GET    /api/passports/{id}
-PATCH  /api/passports/{id}
-GET    /api/passports/{id}/photos/compare      (before/after)
-
-GET    /observations/queue/needs-review        (human validation queue)
-PATCH  /observations/{id}/validate             (confirm | correct | reject)
-
-GET    /api/tasks
-POST   /api/tasks
-PATCH  /api/tasks/{id}
-GET    /api/tasks/queue/overdue
-
-GET    /api/alerts
-POST   /api/alerts/escalate                    (manual escalation)
-PATCH  /api/alerts/{id}/read
-
-GET    /api/weather/current
-GET    /api/weather/forecast
-GET    /api/weather/context
-
-GET    /api/map/zones                           (map-ready markers)
-
-GET    /api/reports/weekly
-POST   /api/reports/weekly/generate
-```
-
-Interactive docs at `/docs`.
-
----
-
-## Field-intelligence modules (v0.2)
-
-These extend the core pipeline. When a new image arrives Hermes now: stores it →
-analyzes → **upserts an Agave Passport** → creates an Observation (with diagnosis,
-confidence, severity) → **applies validation rules** → **auto-creates tasks** →
-adds weather context → raises alerts if rules require → everything shows on the
-dashboard.
-
-- **Agave Passport** (`AgavePassport`) — persistent memory for a plant/row/
-  zone/lot: health status, risk level, photo & observation history, tasks, last
-  and next inspection dates. A passport is reused per lot, matched by GPS
-  proximity (~50 m), or created fresh.
-- **Tasks** (`Task`) — Hermes auto-creates follow-ups (reinspect, validate,
-  closer photo). **Dangerous/expensive actions (treatments) are detected and
-  gated `needs_approval` — never auto-approved.** Humans manage status.
-- **Alerts & notifications** — a provider abstraction (`notification_service`)
-  with **whatsapp / telegram / dashboard / console** channels. No credentials
-  required locally (falls back to console + always records the `Alert` for the
-  dashboard). Triggers: high/urgent severity, repeated zone issue, low
-  confidence + high severity, overdue tasks, weather risk, manual escalation.
-- **Weather** — provider pattern (`MockWeatherProvider`, Open-Meteo, optional
-  OpenWeather via `WEATHER_API_KEY`). Adds forecast, frost/heat risk, and
-  **treatment warnings** ("Avoid applying treatment tomorrow — rain expected").
-  Never breaks the app if no provider/key is configured.
-- **Before/After comparison** — fetches a passport's photo history and pairs the
-  two most recent with a change summary (placeholder now; multimodal visual diff
-  is wired as an extension point).
-- **Diagnosis confidence + human validation** — every observation carries
-  `confidence`, `severity`, `needs_human_review`, `human_validation_status`
-  (pending/confirmed/corrected/rejected) and correction fields. Rule: confidence
-  < 0.75 **or** high/critical severity → needs review. Corrections are stored
-  immutably in `human_validations` as training data; original `model_outputs`
-  are never overwritten.
-- **Weekly reports** — on-demand (`/api/reports/weekly`), no queue: observations,
-  photos, top issues, high-risk zones, open/overdue/completed tasks, weather
-  warnings, follow-ups, human corrections, and thumbnails.
-
-### Satellite / NDVI — Version 2 (NOT implemented)
-
-`app/integrations/satellite_provider.py` defines `SatelliteProvider` and
-`VegetationIndexService` **interfaces only**, with a clear TODO and no concrete
-implementation, no dependency, and no UI. Nothing in the MVP imports it, so it
-cannot affect stability. V2 will add NDVI, satellite imagery, vegetation-health
-maps, drought-stress detection, and regional monitoring.
-
----
-
-## Testing
+Run type checking, if available:
 
 ```bash
-pip install -r requirements.txt   # or: pip install pytest httpx Pillow ...
-pytest -q
+npm run typecheck
 ```
 
-The suite runs **offline on SQLite** with the stub vision client and stubbed
-weather. It covers the Hermes schema, weather normalization/risk, escalation
-rules + cooldown, and the full observation flow (create → model output →
-weather → escalation; correction preserves the original model output).
+Run tests, if available:
+
+```bash
+npm run test
+```
 
 ---
 
-## Safety notes
+## Suggested Demo Flow
 
-- Hermes **assists**; the agronomist makes every final decision.
-- Hermes uses **"suspected" / "possible" / "unknown"** and flags
-  **needs_human_review** when uncertain.
-- Hermes **never** gives a definitive disease diagnosis.
-- Hermes **never** recommends a pesticide, herbicide, fungicide, fertilizer, or
-  any chemical product or dosage — only inspection/sampling next steps.
-- Human corrections are stored as training-quality feedback and the **original
-  AI output is preserved** (`model_outputs` is immutable).
+Use this flow to test the app from beginning to end.
+
+### Step 1: Log In
+
+Use:
+
+```txt
+DEMO / DEMO
+```
+
+### Step 2: Review the Catalogs
+
+Open Catalogs and review:
+
+- Ranches
+- Lots
+- Activities
+- Products
+- Workers
+- Seasons
+- Evidence Rules
+- Carbon Factors
+
+Add or edit a few records.
 
 ---
 
-## Roadmap
+### Step 3: Create or Open a Work Order
 
-- Custom agave **disease/stress classifier** trained on field data
-- **YOLO-based** plant/symptom detection
-- **Drone imagery** upload
-- **Satellite imagery** integration
-- **Offline mobile** app mode for low-connectivity fields
-- **WhatsApp-first** production deployment
-- **PDF report** generation and **weekly automated reports**
-- **Role-based access control** and **farm-owner accounts**
-- **Multi-farm** support
-- **Model training from human corrections** (closing the feedback loop)
-- **Predictive lot risk scoring**
-```
+Go to Operations or Work Orders.
+
+Create or select a work order.
+
+Assign a worker.
+
+Make sure the worker has an email or phone number.
+
+---
+
+### Step 4: Send the Work Order Link
+
+Use the Send Link action.
+
+If no real provider is configured, check the Demo Outbox.
+
+Copy the generated execution link.
+
+---
+
+### Step 5: Open the Worker Link
+
+Open the execution link.
+
+Complete the work order as if you were the field worker.
+
+Add notes and required evidence placeholders.
+
+Submit the work.
+
+---
+
+### Step 6: Review the Submission
+
+Go to the Review Queue.
+
+Approve, reject, or request correction.
+
+---
+
+### Step 7: Check Reports and Carbon
+
+Review the Reports and Carbon modules to see operational summaries and carbon estimates.
+
+---
+
+## Current Status
+
+Agave Field currently focuses on the production-demo workflow.
+
+The goal is to make the product usable with demo data while keeping a clean path toward real production deployment.
+
+Current foundations include:
+
+- Enterprise-style app shell
+- Operations workbook
+- Catalog system
+- Demo login
+- Demo data
+- Worker contact model
+- Work order link flow
+- Evidence requirements
+- Review queue foundation
+- Carbon tracking foundation
+- Settings foundation
+- English/Spanish localization foundation
+- Demo Outbox fallback
+- Audit trail foundation
+
+---
+
+## Safety Notes
+
+Agave Field is an operational support system.
+
+It does not replace professional agronomic judgment.
+
+The app helps organize field work, evidence, review, and traceability, but final decisions should remain with qualified agronomists and responsible supervisors.
+
+Important safety principles:
+
+- Human review is required for critical decisions.
+- Field workers should only execute approved work orders.
+- Product usage should follow legal, agronomic, and safety requirements.
+- The system should not recommend unsafe treatments or dosages.
+- Evidence and audit history should be preserved.
+- Production secrets should never be stored in public code.
+
+---
+
+## AI Position
+
+The core product does not require AI to be useful.
+
+The current foundation is based on:
+
+> Human Work Order + Human Evidence + Human Review + Structured Records = Reliable Agave History
+
+AI image analysis, automated recommendations, or advanced copilots can be added later, but they should not weaken the core workflow.
+
+The product must remain useful even with no AI API key.
+
+Future AI features may include:
+
+- Photo classification
+- Field note summarization
+- Evidence quality checks
+- Pest or disease detection support
+- Carbon reporting assistance
+- Predictive lot risk scoring
+
+Any AI feature should support the agronomist, not replace them.
+
+---
+
+## Production Checklist
+
+Before using Agave Field as a real production system, the following should be completed:
+
+- Connect production database
+- Add real authentication
+- Add role-based access control
+- Secure server-side secret storage
+- Connect object storage for photos
+- Connect email provider
+- Connect WhatsApp or SMS provider
+- Connect weather provider
+- Harden execution link security
+- Add token expiration and revocation
+- Add full audit retention
+- Add backup/export strategy
+- Add monitoring and error tracking
+- Add privacy and security review
+- Add real organization onboarding
+- Add production data migration strategy
+
+---
+
+## Design Philosophy
+
+Agave Field is not designed to be flashy.
+
+It is designed to be trusted.
+
+The interface should feel:
+
+- Clear
+- Dense
+- Calm
+- Serious
+- Structured
+- Operational
+- Reliable
+
+The goal is not decoration.
+
+The goal is control.
+
+A field team should be able to open Agave Field and understand what is happening, what is pending, what needs review, and what has already been approved.
+
+---
+
+## Future Roadmap
+
+Possible future features include:
+
+- Real-time field worker updates
+- Offline-first mobile execution
+- Photo upload and compression
+- GPS map view
+- Weather automation
+- WhatsApp Cloud API integration
+- Email notifications
+- Advanced carbon reporting
+- Excel import/export
+- PDF reports
+- AI-assisted field notes
+- AI photo analysis for evidence review
+- Multi-organization support
+- Advanced permissions
+- Audit-ready compliance exports
+- Satellite / NDVI integration
+- Drone imagery upload
+- Predictive lot risk scoring
+
+---
+
+## Built With
+
+Agave Field is designed around a modern web stack.
+
+Possible stack components include:
+
+- Next.js
+- TypeScript
+- React
+- Tailwind CSS
+- Zod validation
+- Supabase-ready architecture
+- Vercel deployment
+- Modular repository/data layer
+
+---
+
+## Project Mission
+
+Agave Field exists to give agricultural teams a stronger operating system.
+
+Not more chaos.
+
+Not more scattered messages.
+
+Not another spreadsheet that slowly breaks.
+
+A clean, structured, traceable workflow for the field.
+
+From planning to execution.
+
+From evidence to review.
+
+From carbon estimates to operational reports.
+
+One field record at a time.
