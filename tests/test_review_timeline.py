@@ -88,6 +88,35 @@ def test_request_correction_then_resubmit_creates_revision(db):
         s.close()
 
 
+def test_request_correction_notify_emails_fresh_link(db):
+    c = _client()
+    wo, token, item_id, er1 = _submit_one(c)
+    r = c.post(f"/api/review/{er1}/request-correction?notify=true",
+               json={"reviewer_notes": "add a photo"}).json()
+    note = r["notification"]
+    assert note["delivered"] is True and note["recipient"] == "w@x.com"
+    # Raw token/link are never leaked in the response (console mode → dev_link only).
+    assert "token" not in note and "link" not in note and note["dev_link"]
+    # The original link was rotated: the old token no longer resolves...
+    assert c.get(f"/work-orders/complete/{token}").status_code == 404
+    # ...and the fresh link opens the mobile completion page.
+    new_token = note["dev_link"].rsplit("/", 1)[-1]
+    assert c.get(f"/work-orders/complete/{new_token}").status_code == 200
+    # Audit trail records the correction notification.
+    actions = [x["action"] for x in c.get(f"/api/audit/work_order/{wo['id']}").json()]
+    assert "notify_correction" in actions
+
+
+def test_request_correction_without_notify_keeps_original_token(db):
+    c = _client()
+    wo, token, item_id, er1 = _submit_one(c)
+    r = c.post(f"/api/review/{er1}/request-correction",
+               json={"reviewer_notes": "more detail"}).json()
+    # Default path does NOT notify or rotate — original token still works.
+    assert r.get("notification") is None
+    assert c.get(f"/work-orders/complete/{token}").status_code == 200
+
+
 def test_timeline_records_lifecycle(db):
     c = _client()
     wo, token, item_id, er_id = _submit_one(c)

@@ -15,18 +15,27 @@ compliance lead. The product equation:
 - **Language:** Python 3.12
 - **API:** FastAPI (`app/main.py`, routers in `app/api/*`)
 - **ORM/DB:** SQLAlchemy 2.0 (`app/db.py`, `Base`) → **Supabase PostgreSQL** in prod
-  (DB-agnostic models; SQLite for tests)
+  (DB-agnostic models; SQLite for tests). **Alembic is the source of truth for the
+  schema** (`alembic/versions/`, baseline `49fa233d5c67`); `supabase_schema.sql` is
+  kept for reference only.
 - **Validation:** Pydantic v2 (`app/models/schemas.py`, `app/models/ops_schemas.py`)
-- **Dashboard:** **Streamlit** (`dashboard/app.py`) — talks to the API over HTTP via
-  `API_BASE_URL`
+- **Admin frontend (canonical):** **Next.js / TypeScript** (`web/`, App Router, Tailwind,
+  lucide-react) — the primary admin/ops UI. Talks to the API through a same-origin proxy
+  (`web/app/proxy/[...path]/route.ts`) that injects the RBAC key server-side.
+- **Streamlit dashboard:** `dashboard/app.py` — legacy internal command center, still
+  supported for quick internal/ops views; **not** the surface for new admin UI work.
 - **Storage:** S3-compatible (`app/integrations/storage_client.py`) → Supabase Storage
 - **Weather:** `app/integrations/weather_provider.py` (Open-Meteo / mock)
 - **Intake:** Telegram bot (`app/api/telegram_routes.py`) — human-centered, no AI
-- **Deploy:** API on Vercel (`vercel.json`, `api/index.py`); dashboard on Streamlit Cloud
+- **Deploy:** API on Vercel (`vercel.json`, `api/index.py`); `web/` frontend on a separate
+  Vercel project (root dir `web/`); Streamlit dashboard on Streamlit Cloud
 - **Tests:** pytest (`tests/`), offline on SQLite
 
-> This is **NOT** a TypeScript / Next.js / React project. Do not introduce TS, Node,
-> a JS build system, or a different ORM. Write Python that matches the surrounding code.
+> **Backend stack is fixed:** Python 3.12 + FastAPI + SQLAlchemy 2.0 + Pydantic v2. Do
+> **not** swap the backend language, web framework, or ORM. **Frontend:** the canonical
+> admin UI is the Next.js `web/` app (TypeScript/Tailwind) — build new admin/ops screens
+> there. Keep all business logic in the FastAPI services; the frontend is a thin client
+> over `/api/*` (no business logic, no direct DB access).
 
 ## What already exists (operations / traceability layer)
 - Models: `app/models/operations.py` — `Assignee, Product, Activity, WorkOrder,
@@ -36,6 +45,22 @@ compliance lead. The product equation:
   `audit_service.py` (append-only audit), `catalog_service.py` (history-safe CRUD).
 - Routes: `/api/products`, `/api/activities`, `/api/assignees`, `/api/audit/...`.
 - Agronomy base: `Farm`(=field), `Lot`, `FieldZone`(=zone), `AgavePassport`.
+
+## Module boundary (two subsystems)
+This app hosts **two overlapping domains on one DB/app**. Know which you're in
+before extending. Full definition: `docs/wiki/data-flow.md`.
+- **Operations / traceability layer** (`app/models/operations.py`): work-order →
+  execution → review → carbon/audit. Extend this for work orders, executions,
+  evidence, reviews, carbon, audit.
+- **Observation / intake layer** (`app/models/database.py`): Telegram/WhatsApp
+  intake, observations, tasks, alerts, escalations, weekly reports. Extend this
+  for inbound human-reported field signal (AI/vision stays gated OFF).
+- **Shared foundation:** `farms/lots/field_zones/agave_passports`, `/media`
+  storage, the FastAPI app + RBAC, the DB (one Alembic history).
+- **Deliberate divergences:** separate weather tables
+  (`ops_weather_snapshots` vs `weather_snapshots`) and separate timelines (ops
+  `timeline_events` vs observation history). No unified entity timeline yet
+  (roadmap 1.2). Merge-vs-separate is still an open question.
 
 ## Enterprise production goal
 Real DB persistence, real file storage, env validation, safe secrets, secure
@@ -51,7 +76,7 @@ mobile-first task UI, audit logs, clean provider abstractions (email/storage/wea
 - Comment only non-obvious design decisions.
 - Keep models DB-agnostic (no PostGIS-only types) so tests run on SQLite.
 
-## UI/UX standards (Streamlit dashboard + mobile task page)
+## UI/UX standards (Next.js `web/` admin frontend, Streamlit dashboard, mobile task page)
 - Feels like an **agricultural operations command center**, not a generic admin panel.
 - Always show loading / empty / error / success states. Never fake data — if there's
   no data, say "data not available".
@@ -89,7 +114,9 @@ RESEND_API_KEY, WEATHER_PROVIDER, WEATHER_API_KEY, TELEGRAM_*, ENABLE_AI_IMAGE_A
 ## What NOT to do
 - ❌ No LLM/computer-vision image analysis in the MVP (pest/disease/severity/diagnosis).
   `ENABLE_AI_IMAGE_ANALYSIS=false` (default). Photos are evidence; humans are the source of truth.
-- ❌ No framework/stack/ORM swap. No TypeScript/Next.js.
+- ❌ No **backend** framework/language/ORM swap (Python / FastAPI / SQLAlchemy / Pydantic
+  are fixed). No business logic or direct DB access in the frontend. (TypeScript / Next.js
+  IS allowed and IS the canonical admin frontend — but only in `web/`.)
 - ❌ No hard deletes of execution/product/carbon/evidence records.
 - ❌ No mutating historical carbon once snapshotted.
 - ❌ No fabricated carbon factors, no external carbon APIs.
@@ -99,7 +126,9 @@ RESEND_API_KEY, WEATHER_PROVIDER, WEATHER_API_KEY, TELEGRAM_*, ENABLE_AI_IMAGE_A
 ## Implementation workflow
 1. Inspect relevant files first (use `legacy-code-surgeon`).
 2. Plan the smallest safe slice (use `product-architect`).
-3. Implement: model → migration (additive) → service → Pydantic schema → route → dashboard.
+3. Implement: model → **Alembic migration** (`alembic revision --autogenerate -m "..."`,
+   additive; then `alembic upgrade head`) → service → Pydantic schema → route → frontend
+   (`web/`; or the Streamlit dashboard for internal views).
 4. Keep the suite green: `pytest -q`. Add tests for new critical logic.
 5. Update `.env.example` + this file when conventions change.
 6. Verify build/import; report risks. Do not push unless asked.

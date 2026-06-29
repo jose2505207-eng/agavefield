@@ -1,0 +1,37 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install API dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run test suite (offline, SQLite)
+        # conftest.py forces a file-based SQLite DB and a credential-free env,
+        # so the suite runs fully offline with the stub vision client.
+        run: pytest -q
+
+      - name: Verify migrations reproduce the models (no drift)
+        # Alembic is the source of truth for the schema. This applies all
+        # migrations to a fresh SQLite DB, then fails if the ORM models have
+        # changes not captured by a migration — forcing schema changes through
+        # versioned migrations.
+        env:
+          DATABASE_URL: sqlite:///alembic_ci.db
+        run: |
+          alembic upgrade head
+          alembic check

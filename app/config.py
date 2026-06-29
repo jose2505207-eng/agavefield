@@ -59,6 +59,10 @@ class Settings(BaseSettings):
     # Public base URL used to build image links in messages/dashboard.
     public_base_url: str = "http://localhost:8000"
 
+    # CORS: comma-separated allowed origins, or "*" for any (dev default).
+    # Set explicit origins (e.g. the dashboard + web frontend URLs) in production.
+    cors_allow_origins: str = "*"
+
     # --- Operations / work orders ---
     secret_key: str = "dev-insecure-change-me"  # token hashing; override in prod
     app_base_url: str = "http://localhost:8000"  # used for secure work-order links
@@ -101,6 +105,90 @@ class Settings(BaseSettings):
     @property
     def telegram_enabled(self) -> bool:
         return bool(self.telegram_bot_token)
+
+    @property
+    def is_production(self) -> bool:
+        return self.app_env.strip().lower() in {"production", "prod", "staging"}
+
+    @property
+    def cors_origins(self) -> List[str]:
+        raw = (self.cors_allow_origins or "*").strip()
+        if raw == "*" or not raw:
+            return ["*"]
+        return [o.strip() for o in raw.split(",") if o.strip()]
+
+
+# Values that must never survive into a production deployment.
+_INSECURE_SECRETS = {"", "dev-insecure-change-me", "change-me-in-production"}
+
+
+def config_problems(s: "Settings") -> tuple[list[str], list[str]]:
+    """Inspect settings for misconfiguration.
+
+    Returns (critical, warnings). `critical` issues should block a production
+    boot (they weaken security or guarantee broken behavior); `warnings` are
+    surfaced but non-fatal. In non-production envs everything is a warning so
+    local dev / tests keep booting on defaults.
+    """
+    critical: list[str] = []
+    warnings: list[str] = []
+
+    if s.secret_key.strip() in _INSECURE_SECRETS:
+        critical.append(
+            "SECRET_KEY is unset or a known default — work-order tokens would be "
+            "hashed with a publicly known secret. Set a strong random SECRET_KEY."
+        )
+    if "localhost" in s.database_url or s.database_url.startswith(
+        "postgresql://postgres:postgres@localhost"
+    ):
+        warnings.append("DATABASE_URL still points at a local/default database.")
+    if "localhost" in s.app_base_url:
+        warnings.append(
+            "APP_BASE_URL is localhost — secure work-order links will be unreachable "
+            "for field workers."
+        )
+    if s.email_provider.lower() == "smtp" and not s.smtp_host:
+        warnings.append("EMAIL_PROVIDER=smtp but SMTP_HOST is blank; emails fall back to console.")
+    if s.email_provider.lower() == "sendgrid" and not s.sendgrid_api_key:
+        warnings.append("EMAIL_PROVIDER=sendgrid but SENDGRID_API_KEY is blank; emails fall back to console.")
+    if s.email_provider.lower() == "resend" and not s.resend_api_key:
+        warnings.append("EMAIL_PROVIDER=resend but RESEND_API_KEY is blank; emails fall back to console.")
+    if s.storage_provider.lower() == "s3" and not s.storage_bucket:
+        warnings.append("STORAGE_PROVIDER=s3 but STORAGE_BUCKET is blank; storage falls back to local.")
+    if s.is_production and s.cors_origins == ["*"]:
+        warnings.append(
+            "CORS_ALLOW_ORIGINS is '*' in production — set explicit origins "
+            "(dashboard + web frontend URLs)."
+        )
+    if s.is_production and not (s.admin_api_key or s.agronomist_api_key or s.reviewer_api_key):
+        critical.append(
+            "No RBAC API keys configured in production — the admin/ops endpoints are "
+            "open to the public. Set ADMIN_API_KEY (and others)."
+        )
+    return critical, warnings
+
+
+def validate_runtime(s: "Settings") -> None:
+    """Fail fast on critical misconfiguration in production; warn otherwise.
+
+    Safe to call at startup: in development/test envs nothing is raised, so the
+    app still boots on empty defaults.
+    """
+    import logging
+
+    log = logging.getLogger("agave.config")
+    critical, warnings = config_problems(s)
+    for w in warnings:
+        log.warning("Config warning: %s", w)
+    if not critical:
+        return
+    if s.is_production:
+        raise RuntimeError(
+            "Refusing to start in production with critical configuration problems:\n  - "
+            + "\n  - ".join(critical)
+        )
+    for c in critical:
+        log.warning("Config issue (non-prod, not blocking): %s", c)
 
 
 @lru_cache

@@ -13,7 +13,8 @@ from sqlalchemy import engine_from_config, pool
 
 from app.config import settings
 from app.db import Base
-from app.models import database as _models  # noqa: F401  (register tables)
+from app.models import database as _models  # noqa: F401  (register agronomy tables)
+from app.models import operations as _ops  # noqa: F401  (register ops/traceability tables)
 
 config = context.config
 config.set_main_option("sqlalchemy.url", settings.database_url)

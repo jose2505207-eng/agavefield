@@ -72,6 +72,21 @@ def duplicate_work_order(work_order_id: int, db: Session = Depends(get_db)):
     return _detail(db, wo)
 
 
+@router.post("/{work_order_id}/link")
+def generate_work_order_link(work_order_id: int, db: Session = Depends(get_db)):
+    """Generate (or refresh) a shareable completion link without sending email.
+
+    Use for manual delivery (WhatsApp, QR, printout). The link opens the mobile
+    completion page with the work order's checklist tasks and photo-upload fields.
+    Rotates the token, so any previously issued link stops working.
+    """
+    result = work_order_service.generate_link(db, work_order_id)
+    if result is None:
+        raise HTTPException(404, "Work order not found")
+    db.commit()
+    return result
+
+
 @router.post("/{work_order_id}/send")
 def send_work_order(work_order_id: int, db: Session = Depends(get_db)):
     from app.config import settings

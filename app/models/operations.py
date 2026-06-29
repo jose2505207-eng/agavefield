@@ -103,6 +103,26 @@ class Activity(Base, TimestampMixin):
     created_by: Mapped[Optional[str]] = mapped_column(String(128))
 
 
+class Season(Base, TimestampMixin):
+    """First-class season (crop cycle / campaign) directory.
+
+    History-safe: seasons referenced by work orders are deactivated, never
+    hard-deleted. `WorkOrder.season_id` logically references `seasons.id`
+    (kept as a plain nullable Integer, not a DB-level FK, to keep additive
+    migrations safe on SQLite).
+    """
+    __tablename__ = "seasons"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(255), index=True)
+    code: Mapped[Optional[str]] = mapped_column(String(64))
+    start_date: Mapped[Optional[datetime]] = mapped_column(DateTime)
+    end_date: Mapped[Optional[datetime]] = mapped_column(DateTime)
+    description: Mapped[Optional[str]] = mapped_column(Text)
+    active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    created_by: Mapped[Optional[str]] = mapped_column(String(128))
+
+
 # --------------------------------------------------------------------------- #
 # Work orders
 # --------------------------------------------------------------------------- #

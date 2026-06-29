@@ -9,7 +9,7 @@ import { StatusBadge } from "@/components/status-badge";
 import { EmptyState } from "@/components/empty-state";
 import { DemoBadge } from "@/components/demo-badge";
 import {
-  listWorkOrders, listActivities, listAssignees, createWorkOrder, sendWorkOrder,
+  getWorkOrders, listActivities, listAssignees, createWorkOrder, sendWorkOrder,
 } from "@/lib/api";
 import { DEMO_WORK_ORDERS } from "@/lib/demo";
 
@@ -25,11 +25,11 @@ export default function WorkOrdersPage() {
 
   async function load() {
     try {
-      const [wo, acts, asg] = await Promise.all([listWorkOrders(), listActivities(), listAssignees()]);
+      const [wo, acts, asg] = await Promise.all([getWorkOrders(), listActivities(), listAssignees()]);
       setActivities(Array.isArray(acts) ? acts : []);
       setAssignees(Array.isArray(asg) ? asg : []);
-      if (Array.isArray(wo) && wo.length) { setRows(wo); setIsDemo(false); }
-      else { setRows(DEMO_WORK_ORDERS); setIsDemo(true); }
+      setRows(wo.data);
+      setIsDemo(wo.isDemo);
     } catch {
       setRows(DEMO_WORK_ORDERS); setIsDemo(true);
     }

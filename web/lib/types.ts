@@ -71,3 +71,22 @@ export interface DashboardResult {
   data: DashboardData;
   isDemo: boolean;
 }
+
+// Mirrors the backend WorkOrderRead (see app/models/ops_schemas.py). Only the
+// fields the listing page needs are typed; the rest are ignored by the thin client.
+export interface WorkOrderSummary {
+  id: number;
+  work_order_code: string;
+  title: string;
+  status: WorkOrderStatus;
+  due_date?: string | null;
+  field_id?: number | null;
+  lot_id?: number | null;
+  assigned_to_email?: string | null;
+  created_at?: string | null;
+}
+
+export interface WorkOrdersResult {
+  data: WorkOrderSummary[];
+  isDemo: boolean;
+}

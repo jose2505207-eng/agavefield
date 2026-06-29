@@ -166,6 +166,97 @@ def update_work_order(db: Session, work_order_id: int, data: dict, actor: Option
     return wo
 
 
+def _mint_link(wo: WorkOrder) -> dict:
+    """Mint a fresh completion token for `wo`: store ONLY its SHA-256 hash + an
+    expiry on the work order, and return the raw token + shareable link. The raw
+    token is never persisted — the caller decides how to deliver it."""
+    raw_token = secrets.token_urlsafe(32)
+    wo.secure_access_token_hash = hash_token(raw_token)
+    wo.secure_link_expires_at = datetime.utcnow() + timedelta(days=settings.work_order_link_expiry_days)
+    link = f"{settings.app_base_url.rstrip('/')}/work-orders/complete/{raw_token}"
+    return {"token": raw_token, "link": link, "expires_at": wo.secure_link_expires_at}
+
+
+def generate_link(db: Session, work_order_id: int, actor: Optional[str] = None) -> Optional[dict]:
+    """Generate (or refresh) a secure completion link WITHOUT sending email.
+
+    For manual sharing (WhatsApp, QR, printed sheet). The link opens the mobile
+    completion page, which shows the work order's checklist tasks and photo-upload
+    fields. Generating a new link rotates the token (the previous one stops
+    working). Marks the order `sent` if it was still a draft; audit-logged.
+    """
+    wo = db.get(WorkOrder, work_order_id)
+    if not wo:
+        return None
+    minted = _mint_link(wo)
+    if wo.status == "draft":
+        wo.status = "sent"
+        wo.sent_at = datetime.utcnow()
+    db.flush()
+    audit_service.log(db, entity_type="work_order", entity_id=wo.id, action="generate_link",
+                      new_values={"expires_at": minted["expires_at"].isoformat(),
+                                  "delivery": "manual"}, changed_by=actor)
+    _timeline(db, wo, "work_order_link_generated",
+              f"Completion link generated for {wo.work_order_code}", actor)
+    db.flush()
+    return {
+        "work_order_id": wo.id,
+        "work_order_code": wo.work_order_code,
+        "link": minted["link"],
+        "token": minted["token"],
+        "expires_at": minted["expires_at"],
+    }
+
+
+def notify_correction(
+    db: Session, work_order_id: int, reviewer_notes: Optional[str] = None,
+    actor: Optional[str] = None,
+) -> Optional[dict]:
+    """Re-notify the assignee that a correction is required, with a FRESH link.
+
+    Mints a new token (rotating any prior link) and emails the assignee a
+    correction message including the reviewer's notes, so the worker can reopen
+    the mobile completion page and resubmit. Audit-logged + timelined. Returns a
+    result dict, ``{"error": "no_recipient"}``, or ``None`` if the order is gone.
+    """
+    wo = db.get(WorkOrder, work_order_id)
+    if not wo:
+        return None
+    recipient = wo.assigned_to_email
+    if not recipient and wo.assigned_to_id:
+        assignee = db.get(Assignee, wo.assigned_to_id)
+        recipient = assignee.email if assignee else None
+    if not recipient:
+        return {"error": "no_recipient"}
+
+    minted = _mint_link(wo)
+    location = " / ".join(str(x) for x in (wo.field_id, wo.lot_id, wo.zone_id) if x) or "n/a"
+    subject = "Agave Field Work Order — Correction Requested"
+    body = (
+        "A reviewer has requested a correction on your work order.\n\n"
+        f"Title: {wo.title}\n"
+        f"Field / Lot / Zone: {location}\n"
+        + (f"Reviewer notes: {reviewer_notes}\n" if reviewer_notes else "")
+        + f"\nPlease review and resubmit:\n{minted['link']}\n"
+    )
+    delivered, provider = email_client.send_email(recipient, subject, body)
+    db.flush()
+    audit_service.log(db, entity_type="work_order", entity_id=wo.id, action="notify_correction",
+                      new_values={"recipient": recipient, "provider": provider,
+                                  "delivered": delivered}, changed_by=actor, reason=reviewer_notes)
+    _timeline(db, wo, "correction_link_sent", f"Correction link sent to {recipient}", actor)
+    db.flush()
+    return {
+        "work_order_id": wo.id,
+        "recipient": recipient,
+        "provider": provider,
+        "delivered": delivered,
+        "link": minted["link"],
+        "token": minted["token"],
+        "expires_at": minted["expires_at"],
+    }
+
+
 def send_work_order(db: Session, work_order_id: int, actor: Optional[str] = None) -> Optional[dict]:
     """Generate token, email the assignee, mark sent. Returns a result dict or None."""
     wo = db.get(WorkOrder, work_order_id)
@@ -179,10 +270,9 @@ def send_work_order(db: Session, work_order_id: int, actor: Optional[str] = None
     if not recipient:
         return {"error": "no_recipient"}
 
-    raw_token = secrets.token_urlsafe(32)
-    wo.secure_access_token_hash = hash_token(raw_token)
-    wo.secure_link_expires_at = datetime.utcnow() + timedelta(days=settings.work_order_link_expiry_days)
-    link = f"{settings.app_base_url.rstrip('/')}/work-orders/complete/{raw_token}"
+    minted = _mint_link(wo)
+    raw_token = minted["token"]
+    link = minted["link"]
 
     location = " / ".join(str(x) for x in (wo.field_id, wo.lot_id, wo.zone_id) if x) or "n/a"
     subject = "New Agave Field Work Order Assigned"

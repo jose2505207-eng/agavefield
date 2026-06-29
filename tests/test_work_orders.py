@@ -93,3 +93,34 @@ def test_send_without_recipient_returns_error(db):
     wo = work_order_service.create_work_order(db, {"title": "No email"}, [{"activity_id": a.id}])
     db.commit()
     assert work_order_service.send_work_order(db, wo.id) == {"error": "no_recipient"}
+
+
+def test_generate_link_mints_shareable_token_without_email(db):
+    a = _activity(db)
+    # No assignee email needed — the link is for manual sharing (WhatsApp/QR).
+    wo = work_order_service.create_work_order(db, {"title": "Share me"}, [{"activity_id": a.id}])
+    db.commit()
+    result = work_order_service.generate_link(db, wo.id, actor="agronomist")
+    db.commit()
+    assert "/work-orders/complete/" in result["link"]
+    assert result["link"].endswith(result["token"])
+    refreshed = db.get(WorkOrder, wo.id)
+    # Only the hash is persisted; status advances out of draft.
+    assert refreshed.status == "sent" and refreshed.secure_access_token_hash
+    assert refreshed.secure_access_token_hash != result["token"]
+    # The token resolves to the work order (used by the mobile completion page).
+    assert work_order_service.find_by_token(db, result["token"]).id == wo.id
+    assert "generate_link" in [l.action for l in audit_service.history(db, "work_order", wo.id)]
+
+
+def test_generate_link_rotates_token(db):
+    a = _activity(db)
+    wo = work_order_service.create_work_order(db, {"title": "Rotate"}, [{"activity_id": a.id}])
+    db.commit()
+    first = work_order_service.generate_link(db, wo.id)
+    db.commit()
+    second = work_order_service.generate_link(db, wo.id)
+    db.commit()
+    # Re-generating rotates the token: the old link stops working.
+    assert work_order_service.find_by_token(db, first["token"]) is None
+    assert work_order_service.find_by_token(db, second["token"]).id == wo.id

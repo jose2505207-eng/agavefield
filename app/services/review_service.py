@@ -120,13 +120,24 @@ def reject(db, execution_id, *, reviewer_name=None, reviewer_id=None, reviewer_n
 
 
 def request_correction(db, execution_id, *, reviewer_name=None, reviewer_id=None,
-                       reviewer_notes=None, correction_due_date=None):
-    return _decide(db, execution_id, review_status="needs_correction",
-                   compliance_status="needs_correction", item_status="needs_correction",
-                   timeline_event="correction_requested", timeline_title="Correction requested",
-                   reviewer_name=reviewer_name, reviewer_id=reviewer_id,
-                   reviewer_notes=reviewer_notes, correction_requested=True,
-                   correction_due_date=correction_due_date)
+                       reviewer_notes=None, correction_due_date=None, notify=False):
+    result = _decide(db, execution_id, review_status="needs_correction",
+                     compliance_status="needs_correction", item_status="needs_correction",
+                     timeline_event="correction_requested", timeline_title="Correction requested",
+                     reviewer_name=reviewer_name, reviewer_id=reviewer_id,
+                     reviewer_notes=reviewer_notes, correction_requested=True,
+                     correction_due_date=correction_due_date)
+    # Opt-in: re-email the assignee a FRESH completion link so they can resubmit.
+    # Off by default so the original token keeps working for the existing flow.
+    if result and notify:
+        from app.services import work_order_service
+
+        er = db.get(ExecutionRecord, execution_id)
+        if er:
+            result["notification"] = work_order_service.notify_correction(
+                db, er.work_order_id, reviewer_notes=reviewer_notes, actor=reviewer_name
+            )
+    return result
 
 
 def revision_history(db: Session, execution_id: int) -> list[ExecutionRecord]:

@@ -28,6 +28,41 @@ class CarbonFactorUnit(str, Enum):
 
 
 # --------------------------------------------------------------------------- #
+# Season
+# --------------------------------------------------------------------------- #
+class SeasonCreate(BaseModel):
+    name: str
+    code: Optional[str] = None
+    start_date: Optional[datetime] = None
+    end_date: Optional[datetime] = None
+    description: Optional[str] = None
+    created_by: Optional[str] = None
+
+
+class SeasonUpdate(BaseModel):
+    name: Optional[str] = None
+    code: Optional[str] = None
+    start_date: Optional[datetime] = None
+    end_date: Optional[datetime] = None
+    description: Optional[str] = None
+    active: Optional[bool] = None
+
+
+class SeasonRead(BaseModel):
+    id: int
+    name: str
+    code: Optional[str] = None
+    start_date: Optional[datetime] = None
+    end_date: Optional[datetime] = None
+    description: Optional[str] = None
+    active: bool
+    created_by: Optional[str] = None
+    created_at: Optional[datetime] = None
+
+    model_config = {"from_attributes": True}
+
+
+# --------------------------------------------------------------------------- #
 # Assignee
 # --------------------------------------------------------------------------- #
 class AssigneeCreate(BaseModel):

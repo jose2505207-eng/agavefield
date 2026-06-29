@@ -1,5 +1,8 @@
-import { DEMO_DASHBOARD } from "./demo";
-import type { DashboardData, DashboardResult, WeatherStatus, WorkOrderStatus } from "./types";
+import { DEMO_DASHBOARD, DEMO_WORK_ORDERS } from "./demo";
+import type {
+  DashboardData, DashboardResult, WeatherStatus, WorkOrderStatus,
+  WorkOrderSummary, WorkOrdersResult,
+} from "./types";
 
 // All calls go through the same-origin Next.js proxy (/proxy/...), which injects
 // the RBAC API key server-side. Demo fallback keeps read views meaningful.
@@ -77,7 +80,19 @@ export async function getDashboardData(): Promise<DashboardResult> {
   }
 }
 
-// ---- Work Orders ----
+// ---- Work Orders (with demo fallback, mirroring getDashboardData) ----
+export async function getWorkOrders(): Promise<WorkOrdersResult> {
+  try {
+    const rows = await apiGet("/api/work-orders");
+    if (!Array.isArray(rows) || rows.length === 0) {
+      return { data: DEMO_WORK_ORDERS as WorkOrderSummary[], isDemo: true };
+    }
+    return { data: rows as WorkOrderSummary[], isDemo: false };
+  } catch {
+    return { data: DEMO_WORK_ORDERS as WorkOrderSummary[], isDemo: true };
+  }
+}
+
 export const listWorkOrders = () => apiGet("/api/work-orders");
 export const listActivities = () => apiGet("/api/activities?include_inactive=false");
 export const listAssignees = () => apiGet("/api/assignees?include_inactive=false");

@@ -20,6 +20,7 @@ from app.api import (
     execution_routes,
     ops_photo_routes,
     review_routes,
+    season_routes,
     system_routes,
     timeline_routes,
     work_order_routes,
@@ -34,7 +35,7 @@ from app.api import (
     weather_routes,
     whatsapp_routes,
 )
-from app.config import settings
+from app.config import settings, validate_runtime
 from app.db import init_db
 from app.integrations.storage_client import STORAGE_ROOT
 
@@ -46,6 +47,10 @@ logger = logging.getLogger("agave")
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
+    # Fail fast on critical misconfiguration in production (insecure SECRET_KEY,
+    # open RBAC). In dev/test this only logs warnings, so the app still boots on
+    # empty defaults.
+    validate_runtime(settings)
     # Best-effort schema ensure. Must never crash startup: on serverless
     # (Vercel) the filesystem is read-only and the DB schema already exists
     # (created via supabase_schema.sql), so a failure here is non-fatal.
@@ -72,7 +77,7 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=settings.cors_origins,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -116,6 +121,7 @@ _staff = [Depends(require_staff)]
 _reviewer = [Depends(require_reviewer)]
 app.include_router(assignee_routes.router, dependencies=_staff)
 app.include_router(catalog_routes.router, dependencies=_staff)
+app.include_router(season_routes.router, dependencies=_staff)
 app.include_router(audit_routes.router, dependencies=_staff)
 app.include_router(work_order_routes.router, dependencies=_staff)
 app.include_router(ops_photo_routes.router)          # upload is token-authorized

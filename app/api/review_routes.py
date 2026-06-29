@@ -42,15 +42,27 @@ def reject(execution_record_id: int, payload: ReviewAction = Body(default=Review
 
 @router.post("/review/{execution_record_id}/request-correction")
 def request_correction(execution_record_id: int, payload: ReviewAction = Body(default=ReviewAction()),
-                       db: Session = Depends(get_db)):
+                       notify: bool = Query(False), db: Session = Depends(get_db)):
+    """Request a correction. Pass ``?notify=true`` to re-email the assignee a
+    FRESH completion link (rotates the token) so they can resubmit."""
     result = review_service.request_correction(
         db, execution_record_id, reviewer_name=payload.reviewer_name,
         reviewer_id=payload.reviewer_id, reviewer_notes=payload.reviewer_notes,
-        correction_due_date=payload.correction_due_date,
+        correction_due_date=payload.correction_due_date, notify=notify,
     )
     if result is None:
         raise HTTPException(404, "Execution record not found")
     db.commit()
+    # Never leak the raw token/link in the API response. In local console mode
+    # expose a dev_link for convenience (same policy as the /send endpoint).
+    note = result.get("notification")
+    if note and "link" in note:
+        from app.config import settings
+
+        if settings.email_provider.lower() == "console":
+            note["dev_link"] = note.get("link")
+        note.pop("token", None)
+        note.pop("link", None)
     return result
 
 

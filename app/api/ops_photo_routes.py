@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Upload
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.api.auth import require_staff
 from app.db import get_db
 from app.models.operations import PhotoEvidence
 from app.services import image_service, work_order_service
@@ -67,7 +68,7 @@ async def upload_photo(
             "gps_source": photo.gps_source}
 
 
-@router.get("")
+@router.get("", dependencies=[Depends(require_staff)])
 def list_photos(work_order_id: Optional[int] = None, execution_record_id: Optional[int] = None,
                 lot_id: Optional[int] = None, limit: int = Query(200, le=500),
                 db: Session = Depends(get_db)):
