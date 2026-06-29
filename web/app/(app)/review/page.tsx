@@ -9,23 +9,27 @@ import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/empty-state";
 import { DemoBadge } from "@/components/demo-badge";
 import { listReviewQueue, reviewAction } from "@/lib/api";
+import { useAuth } from "@/lib/auth";
 import { DEMO_REVIEW } from "@/lib/demo";
 import { kg } from "@/lib/utils";
 
 export default function ReviewPage() {
+  const { isDemo, loading: authLoading } = useAuth();
   const [rows, setRows] = useState<any[] | null>(null);
-  const [isDemo, setIsDemo] = useState(false);
   const [notes, setNotes] = useState<Record<number, string>>({});
   const [msg, setMsg] = useState<{ text: string; ok: boolean } | null>(null);
 
   async function load() {
+    if (isDemo) { setRows(DEMO_REVIEW); return; }
     try {
       const q = await listReviewQueue();
-      if (Array.isArray(q) && q.length) { setRows(q); setIsDemo(false); }
-      else { setRows(DEMO_REVIEW); setIsDemo(true); }
-    } catch { setRows(DEMO_REVIEW); setIsDemo(true); }
+      setRows(Array.isArray(q) ? q : []);
+    } catch {
+      setRows([]);
+      setMsg({ text: "Couldn't load the review queue — the API is unreachable.", ok: false });
+    }
   }
-  useEffect(() => { load(); }, []);
+  useEffect(() => { if (!authLoading) load(); }, [authLoading, isDemo]);
 
   async function act(id: number, action: "approve" | "reject" | "request-correction") {
     try {

@@ -344,3 +344,52 @@ class AuditLog(Base):
     reason: Mapped[Optional[str]] = mapped_column(Text)
     ip_address: Mapped[Optional[str]] = mapped_column(String(64))
     user_agent: Mapped[Optional[str]] = mapped_column(String(512))
+
+
+# --------------------------------------------------------------------------- #
+# Admin / staff login accounts
+# --------------------------------------------------------------------------- #
+class AppUser(Base, TimestampMixin):
+    """A human who logs into the web admin UI.
+
+    Distinct from the observation-layer ``User`` (Telegram/WhatsApp intake
+    identities, table ``users``). Field workers are NOT here — they use a
+    per-work-order token on the public mobile completion page.
+
+    ``is_demo`` accounts render curated demo data in the frontend and are
+    read-only (mutating actions are disabled in the UI), so the demo experience
+    never touches the live dataset.
+    """
+
+    __tablename__ = "app_users"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    username: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    password_hash: Mapped[str] = mapped_column(String(255))
+    full_name: Mapped[Optional[str]] = mapped_column(String(255))
+    # admin | agronomist | reviewer — mirrors the API-key RBAC roles.
+    role: Mapped[str] = mapped_column(String(24), default="admin")
+    is_demo: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    last_login_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
+
+
+class AppSession(Base, TimestampMixin):
+    """A server-side record of an issued login session.
+
+    Session tokens are stateless HMAC-signed blobs, but each one also carries a
+    unique ``jti`` recorded here so a session can be revoked server-side: logout
+    (and "log out everywhere") flips ``revoked_at``, after which the token is
+    rejected by ``auth_service.user_from_token`` even though its signature is
+    still valid and unexpired. This is the kill-switch the stateless design
+    otherwise lacked.
+    """
+
+    __tablename__ = "app_sessions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    jti: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("app_users.id"), index=True)
+    username: Mapped[str] = mapped_column(String(64), index=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime)
+    revoked_at: Mapped[Optional[datetime]] = mapped_column(DateTime)

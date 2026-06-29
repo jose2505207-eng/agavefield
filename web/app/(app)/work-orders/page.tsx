@@ -11,30 +11,37 @@ import { DemoBadge } from "@/components/demo-badge";
 import {
   getWorkOrders, listActivities, listAssignees, createWorkOrder, sendWorkOrder,
 } from "@/lib/api";
+import { useAuth } from "@/lib/auth";
 import { DEMO_WORK_ORDERS } from "@/lib/demo";
 
 const OPEN = ["draft", "scheduled", "sent", "in_progress"];
 
 export default function WorkOrdersPage() {
+  const { isDemo, loading: authLoading } = useAuth();
   const [rows, setRows] = useState<any[] | null>(null);
-  const [isDemo, setIsDemo] = useState(false);
   const [activities, setActivities] = useState<any[]>([]);
   const [assignees, setAssignees] = useState<any[]>([]);
   const [showForm, setShowForm] = useState(false);
   const [msg, setMsg] = useState<{ text: string; ok: boolean } | null>(null);
 
   async function load() {
+    if (isDemo) {
+      setRows(DEMO_WORK_ORDERS);
+      setActivities([]);
+      setAssignees([]);
+      return;
+    }
     try {
-      const [wo, acts, asg] = await Promise.all([getWorkOrders(), listActivities(), listAssignees()]);
+      const [wo, acts, asg] = await Promise.all([getWorkOrders(false), listActivities(), listAssignees()]);
       setActivities(Array.isArray(acts) ? acts : []);
       setAssignees(Array.isArray(asg) ? asg : []);
       setRows(wo.data);
-      setIsDemo(wo.isDemo);
     } catch {
-      setRows(DEMO_WORK_ORDERS); setIsDemo(true);
+      setRows([]);
+      setMsg({ text: "Couldn't load work orders — the API is unreachable.", ok: false });
     }
   }
-  useEffect(() => { load(); }, []);
+  useEffect(() => { if (!authLoading) load(); }, [authLoading, isDemo]);
 
   async function onSend(id: number) {
     try {

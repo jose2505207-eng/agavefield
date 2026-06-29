@@ -23,6 +23,43 @@ async function apiSend(method: string, path: string, body?: unknown): Promise<an
   return json;
 }
 
+// ---- Auth ----
+export type AuthUser = { username: string; full_name?: string; role: string; is_demo: boolean };
+
+export async function getMe(): Promise<AuthUser> {
+  const res = await fetch("/proxy/api/auth/me", { cache: "no-store" });
+  if (!res.ok) throw new Error("unauthenticated");
+  return res.json();
+}
+
+export async function loginRequest(username: string, password: string): Promise<AuthUser> {
+  const res = await fetch("/api/login", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ username, password }),
+  });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(json?.detail || "Login failed");
+  return json.user as AuthUser;
+}
+
+export async function logoutRequest(): Promise<void> {
+  await fetch("/api/logout", { method: "POST" });
+}
+
+// ---- Catalog CSV import (multipart; goes through the proxy) ----
+export async function importCatalogCsv(
+  kind: "products" | "activities",
+  file: File,
+): Promise<{ imported: number; skipped: number; errors: string[] }> {
+  const fd = new FormData();
+  fd.append("file", file);
+  const res = await fetch(`/proxy/api/catalog/import?kind=${kind}`, { method: "POST", body: fd });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(json?.detail || `import failed (${res.status})`);
+  return json;
+}
+
 const OPEN_STATUSES = new Set<WorkOrderStatus>(["draft", "scheduled", "sent", "in_progress"]);
 
 function weatherStatus(rainProb: number | null, rainMm: number | null): WeatherStatus {
@@ -32,68 +69,70 @@ function weatherStatus(rainProb: number | null, rainMm: number | null): WeatherS
   return "dry";
 }
 
-// ---- Dashboard (with demo fallback) ----
-export async function getDashboardData(): Promise<DashboardResult> {
+const UNKNOWN_WEATHER: DashboardData["weather"] = {
+  tempC: null, rainProbability: null, rainNext24h: null, status: "unknown", updated: "unavailable",
+};
+
+// ---- Dashboard ----
+// Demo data is shown ONLY for the demo account (isDemo=true). Real accounts get
+// live data and genuine empty states (zeros / "no data") — never fake records.
+// On a real backend error the promise rejects so the page shows an error state.
+export async function getDashboardData(isDemo: boolean): Promise<DashboardResult> {
+  if (isDemo) return { data: DEMO_DASHBOARD, isDemo: true };
+
+  const [status, workOrders, carbon, queue] = await Promise.all([
+    apiGet("/api/system/status"),
+    apiGet("/api/work-orders"),
+    apiGet("/api/carbon/summary"),
+    apiGet("/api/review-queue"),
+  ]);
+
+  let weather = UNKNOWN_WEATHER;
   try {
-    const [status, workOrders, carbon, queue] = await Promise.all([
-      apiGet("/api/system/status"),
-      apiGet("/api/work-orders"),
-      apiGet("/api/carbon/summary"),
-      apiGet("/api/review-queue"),
-    ]);
-    if (!(status?.counts?.work_orders ?? 0)) return { data: DEMO_DASHBOARD, isDemo: true };
-
-    let weather = DEMO_DASHBOARD.weather;
-    try {
-      const ctx = await apiGet("/api/weather/context?lat=20.8806&lon=-103.8366");
-      const cur = ctx?.current || {};
-      const f0 = (ctx?.forecast || [])[0] || {};
-      weather = {
-        tempC: cur.temperature_c ?? null, rainProbability: f0.precip_prob ?? null,
-        rainNext24h: f0.precip_mm ?? null,
-        status: weatherStatus(f0.precip_prob ?? null, f0.precip_mm ?? null), updated: "live",
-      };
-    } catch { /* keep demo weather */ }
-
-    const data: DashboardData = {
-      todayOps: {
-        scheduled: (workOrders as any[]).filter((w) => ["scheduled", "sent"].includes(w.status)).length,
-        inProgress: (workOrders as any[]).filter((w) => w.status === "in_progress").length,
-        submitted: status?.counts?.pending_review ?? 0,
-      },
-      completedToday: (workOrders as any[]).filter((w) => ["approved", "completed"].includes(w.status)).length,
-      reviewCount: Array.isArray(queue) ? queue.length : 0,
-      pendingWorkOrders: (workOrders as any[]).filter((w) => OPEN_STATUSES.has(w.status)).slice(0, 6).map((w) => ({
-        code: w.work_order_code, title: w.title, status: w.status,
-        lot: w.lot_id ? `Lot ${w.lot_id}` : undefined, due: w.due_date?.slice(0, 10), assignee: w.assigned_to_email,
-      })),
-      carbon: {
-        plannedKg: carbon?.total_planned_kgco2e ?? 0, actualKg: carbon?.total_actual_kgco2e ?? 0,
-        perHa: carbon?.kgco2e_per_hectare ?? null, topActivity: carbon?.top_activities?.[0]?.activity_name,
-        missingData: carbon?.records_missing_carbon_data ?? 0,
-      },
-      weather, recentEvidence: [], lots: [], timeline: [],
+    const ctx = await apiGet("/api/weather/context?lat=20.8806&lon=-103.8366");
+    const cur = ctx?.current || {};
+    const f0 = (ctx?.forecast || [])[0] || {};
+    weather = {
+      tempC: cur.temperature_c ?? null, rainProbability: f0.precip_prob ?? null,
+      rainNext24h: f0.precip_mm ?? null,
+      status: weatherStatus(f0.precip_prob ?? null, f0.precip_mm ?? null), updated: "live",
     };
-    return { data, isDemo: false };
-  } catch {
-    return { data: DEMO_DASHBOARD, isDemo: true };
-  }
+  } catch { /* weather is best-effort; leave as unknown */ }
+
+  const wos = Array.isArray(workOrders) ? (workOrders as any[]) : [];
+  const data: DashboardData = {
+    todayOps: {
+      scheduled: wos.filter((w) => ["scheduled", "sent"].includes(w.status)).length,
+      inProgress: wos.filter((w) => w.status === "in_progress").length,
+      submitted: status?.counts?.pending_review ?? 0,
+    },
+    completedToday: wos.filter((w) => ["approved", "completed"].includes(w.status)).length,
+    reviewCount: Array.isArray(queue) ? queue.length : 0,
+    pendingWorkOrders: wos.filter((w) => OPEN_STATUSES.has(w.status)).slice(0, 6).map((w) => ({
+      code: w.work_order_code, title: w.title, status: w.status,
+      lot: w.lot_id ? `Lot ${w.lot_id}` : undefined, due: w.due_date?.slice(0, 10), assignee: w.assigned_to_email,
+    })),
+    carbon: {
+      plannedKg: carbon?.total_planned_kgco2e ?? 0, actualKg: carbon?.total_actual_kgco2e ?? 0,
+      perHa: carbon?.kgco2e_per_hectare ?? null, topActivity: carbon?.top_activities?.[0]?.activity_name,
+      missingData: carbon?.records_missing_carbon_data ?? 0,
+    },
+    weather, recentEvidence: [], lots: [], timeline: [],
+  };
+  return { data, isDemo: false };
 }
 
-// ---- Work Orders (with demo fallback, mirroring getDashboardData) ----
-export async function getWorkOrders(): Promise<WorkOrdersResult> {
-  try {
-    const rows = await apiGet("/api/work-orders");
-    if (!Array.isArray(rows) || rows.length === 0) {
-      return { data: DEMO_WORK_ORDERS as WorkOrderSummary[], isDemo: true };
-    }
-    return { data: rows as WorkOrderSummary[], isDemo: false };
-  } catch {
-    return { data: DEMO_WORK_ORDERS as WorkOrderSummary[], isDemo: true };
-  }
+// ---- Work Orders ----
+// Demo rows only for the demo account; real accounts get live rows (possibly
+// empty). Errors reject so the caller can show an error state.
+export async function getWorkOrders(isDemo: boolean): Promise<WorkOrdersResult> {
+  if (isDemo) return { data: DEMO_WORK_ORDERS as WorkOrderSummary[], isDemo: true };
+  const rows = await apiGet("/api/work-orders");
+  return { data: (Array.isArray(rows) ? rows : []) as WorkOrderSummary[], isDemo: false };
 }
 
 export const listWorkOrders = () => apiGet("/api/work-orders");
+export const listProducts = () => apiGet("/api/products?include_inactive=false");
 export const listActivities = () => apiGet("/api/activities?include_inactive=false");
 export const listAssignees = () => apiGet("/api/assignees?include_inactive=false");
 export const createWorkOrder = (body: unknown) => apiSend("POST", "/api/work-orders", body);

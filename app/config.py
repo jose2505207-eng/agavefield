@@ -64,7 +64,9 @@ class Settings(BaseSettings):
     cors_allow_origins: str = "*"
 
     # --- Operations / work orders ---
-    secret_key: str = "dev-insecure-change-me"  # token hashing; override in prod
+    # Signs admin login session tokens (HMAC). Rotating it invalidates all live
+    # sessions. NOT used for work-order link hashing (those use keyless sha256).
+    secret_key: str = "dev-insecure-change-me"  # override in prod
     app_base_url: str = "http://localhost:8000"  # used for secure work-order links
 
     # Role-based access (API keys). If ALL are empty, auth is OPEN (dev mode);
@@ -73,6 +75,16 @@ class Settings(BaseSettings):
     agronomist_api_key: str = ""
     reviewer_api_key: str = ""
     work_order_link_expiry_days: int = 14
+
+    # --- Admin login (web UI accounts; separate from the API-key RBAC above) ---
+    # Stateless sessions are signed with SECRET_KEY. The DEMO account is always
+    # seeded (read-only demo data). A real admin is seeded only if both creds
+    # are set. Passwords are stored as pbkdf2 hashes, never in plaintext.
+    session_ttl_hours: int = 12
+    demo_username: str = "DEMO"
+    demo_password: str = "DEMO"
+    auth_admin_username: str = ""
+    auth_admin_password: str = ""
 
     # Email delivery for work-order links.
     email_provider: str = "console"  # console | smtp | sendgrid | resend
@@ -164,6 +176,11 @@ def config_problems(s: "Settings") -> tuple[list[str], list[str]]:
         critical.append(
             "No RBAC API keys configured in production — the admin/ops endpoints are "
             "open to the public. Set ADMIN_API_KEY (and others)."
+        )
+    if s.is_production and not (s.auth_admin_username and s.auth_admin_password):
+        warnings.append(
+            "No real admin login configured in production — only the read-only DEMO "
+            "account exists. Set AUTH_ADMIN_USERNAME and AUTH_ADMIN_PASSWORD."
         )
     return critical, warnings
 

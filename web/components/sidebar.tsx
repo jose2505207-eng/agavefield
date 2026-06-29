@@ -2,12 +2,14 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Leaf } from "lucide-react";
+import { Leaf, LogOut, User } from "lucide-react";
 import { NAV } from "@/lib/nav";
 import { cn } from "@/lib/utils";
+import { useAuth } from "@/lib/auth";
 
 export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
   const pathname = usePathname();
+  const { user, isDemo, logout } = useAuth();
   return (
     <div className="flex h-full flex-col">
       <div className="flex items-center gap-2.5 px-5 py-5">
@@ -38,8 +40,32 @@ export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
           );
         })}
       </nav>
-      <div className="px-5 py-4 text-[11px] text-ink-muted">
-        Tequila · Jalisco
+      <div className="mt-2 border-t border-line px-3 py-3">
+        {user ? (
+          <div className="flex items-center justify-between gap-2 rounded-xl px-2 py-1.5">
+            <div className="flex min-w-0 items-center gap-2">
+              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-sand text-ink-soft">
+                <User className="h-4 w-4" />
+              </span>
+              <div className="min-w-0 leading-tight">
+                <p className="truncate text-xs font-medium text-ink">{user.username}</p>
+                <p className="truncate text-[11px] text-ink-muted">
+                  {isDemo ? "Demo · read-only" : user.role}
+                </p>
+              </div>
+            </div>
+            <button
+              onClick={logout}
+              className="rounded-lg p-1.5 text-ink-muted hover:bg-sand hover:text-ink"
+              aria-label="Sign out"
+              title="Sign out"
+            >
+              <LogOut className="h-4 w-4" />
+            </button>
+          </div>
+        ) : (
+          <div className="px-2 py-1.5 text-[11px] text-ink-muted">Tequila · Jalisco</div>
+        )}
       </div>
     </div>
   );

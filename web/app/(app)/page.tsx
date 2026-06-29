@@ -15,15 +15,20 @@ import { EmptyState } from "@/components/empty-state";
 import { DemoBadge } from "@/components/demo-badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { getDashboardData } from "@/lib/api";
+import { useAuth } from "@/lib/auth";
 import type { DashboardResult } from "@/lib/types";
 
 export default function DashboardPage() {
+  const { isDemo, loading: authLoading } = useAuth();
   const [res, setRes] = useState<DashboardResult | null>(null);
   const [error, setError] = useState(false);
 
   useEffect(() => {
-    getDashboardData().then(setRes).catch(() => setError(true));
-  }, []);
+    if (authLoading) return;
+    setError(false);
+    setRes(null);
+    getDashboardData(isDemo).then(setRes).catch(() => setError(true));
+  }, [authLoading, isDemo]);
 
   if (error) {
     return (
@@ -37,7 +42,7 @@ export default function DashboardPage() {
 
   if (!res) return <DashboardSkeleton />;
 
-  const { data, isDemo } = res;
+  const { data } = res;
   return (
     <>
       <PageHeader

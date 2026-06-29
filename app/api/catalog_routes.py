@@ -1,7 +1,7 @@
 """Product & Activity catalog API routes."""
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from sqlalchemy.orm import Session
 
 from app.db import get_db
@@ -82,3 +82,27 @@ def delete_activity(activity_id: int, db: Session = Depends(get_db)):
         raise HTTPException(404, "Activity not found")
     db.commit()
     return {"result": result}
+
+
+# --- CSV import (bulk-load real catalogs; carbon factors must be your values) ---
+@router.post("/catalog/import")
+async def import_catalog(
+    kind: str = Query(..., pattern="^(products|activities)$"),
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+):
+    """Bulk-import products or activities from an uploaded CSV.
+
+    Template columns: scripts/catalog_products.template.csv /
+    catalog_activities.template.csv. Blank cells are skipped; no data is invented.
+    """
+    raw = await file.read()
+    try:
+        text = raw.decode("utf-8-sig")  # tolerate a BOM from spreadsheet exports
+    except UnicodeDecodeError:
+        raise HTTPException(400, "File must be UTF-8 encoded CSV")
+    if not text.strip():
+        raise HTTPException(400, "Uploaded file is empty")
+    summary = catalog_service.import_csv(db, kind, text)
+    db.commit()
+    return summary

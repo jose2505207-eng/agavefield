@@ -11,6 +11,7 @@ import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/empty-state";
 import { DemoBadge } from "@/components/demo-badge";
 import { listTimeline, listPhotos } from "@/lib/api";
+import { useAuth } from "@/lib/auth";
 import { DEMO_TIMELINE, DEMO_PHOTOS } from "@/lib/demo";
 import { kg } from "@/lib/utils";
 
@@ -44,27 +45,28 @@ function fmtTime(v?: string | null) {
 }
 
 export default function TimelinePage() {
+  const { isDemo, loading: authLoading } = useAuth();
   const [events, setEvents] = useState<any[] | null>(null);
   const [photos, setPhotos] = useState<any[]>([]);
-  const [isDemo, setIsDemo] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
 
   useEffect(() => {
+    if (authLoading) return;
     (async () => {
+      if (isDemo) { setEvents(DEMO_TIMELINE); setPhotos(DEMO_PHOTOS); return; }
+      setErr(null);
       try {
         const [ev, ph] = await Promise.all([listTimeline(), listPhotos()]);
-        const hasEvents = Array.isArray(ev) && ev.length;
-        if (hasEvents) {
-          setEvents(ev);
-          setPhotos(Array.isArray(ph) ? ph : []);
-          setIsDemo(false);
-        } else {
-          setEvents(DEMO_TIMELINE); setPhotos(DEMO_PHOTOS); setIsDemo(true);
-        }
+        setEvents(Array.isArray(ev) ? ev : []);
+        setPhotos(Array.isArray(ph) ? ph : []);
       } catch {
-        setEvents(DEMO_TIMELINE); setPhotos(DEMO_PHOTOS); setIsDemo(true);
+        // Distinguish a real failure from a genuinely empty record — never show
+        // "no history" when the API is actually unreachable.
+        setEvents([]); setPhotos([]);
+        setErr("Couldn't load the timeline — the API is unreachable. This is not an empty record.");
       }
     })();
-  }, []);
+  }, [authLoading, isDemo]);
 
   // Group chronologically (newest first) by month/year — the spine of the
   // multi-year record.
@@ -88,7 +90,9 @@ export default function TimelinePage() {
         actions={isDemo ? <DemoBadge /> : undefined}
       />
 
-      {events === null ? (
+      {err ? (
+        <div className="rounded-xl border border-danger/30 bg-[#F7E0E0] p-4 text-sm text-danger">{err}</div>
+      ) : events === null ? (
         <div className="space-y-3">{[0, 1, 2, 3].map((i) => <div key={i} className="h-16 animate-pulse rounded-xl border border-line bg-white" />)}</div>
       ) : events.length === 0 ? (
         <EmptyState icon={Images} title="No history yet"

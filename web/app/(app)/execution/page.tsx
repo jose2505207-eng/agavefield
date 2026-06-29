@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/empty-state";
 import { DemoBadge } from "@/components/demo-badge";
 import { listExecutions } from "@/lib/api";
+import { useAuth } from "@/lib/auth";
 import { DEMO_EXECUTIONS } from "@/lib/demo";
 import { kg } from "@/lib/utils";
 
@@ -25,18 +26,25 @@ function fmtDate(v?: string | null) {
 }
 
 export default function ExecutionPage() {
+  const { isDemo, loading: authLoading } = useAuth();
   const [rows, setRows] = useState<any[] | null>(null);
-  const [isDemo, setIsDemo] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
 
   useEffect(() => {
+    if (authLoading) return;
     (async () => {
+      if (isDemo) { setRows(DEMO_EXECUTIONS); return; }
+      setErr(null);
       try {
         const r = await listExecutions();
-        if (Array.isArray(r) && r.length) { setRows(r); setIsDemo(false); }
-        else { setRows(DEMO_EXECUTIONS); setIsDemo(true); }
-      } catch { setRows(DEMO_EXECUTIONS); setIsDemo(true); }
+        setRows(Array.isArray(r) ? r : []);
+      } catch {
+        // A failed fetch must not masquerade as "no submissions yet".
+        setRows([]);
+        setErr("Couldn't load executions — the API is unreachable. This is not an empty board.");
+      }
     })();
-  }, []);
+  }, [authLoading, isDemo]);
 
   const lanes = LANES.map((l) => ({
     ...l,
@@ -51,7 +59,9 @@ export default function ExecutionPage() {
         actions={isDemo ? <DemoBadge /> : undefined}
       />
 
-      {rows === null ? (
+      {err ? (
+        <div className="rounded-xl border border-danger/30 bg-[#F7E0E0] p-4 text-sm text-danger">{err}</div>
+      ) : rows === null ? (
         <div className="grid gap-4 lg:grid-cols-3">
           {[0, 1, 2].map((i) => <div key={i} className="h-64 animate-pulse rounded-2xl border border-line bg-white" />)}
         </div>

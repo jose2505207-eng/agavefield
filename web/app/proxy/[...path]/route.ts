@@ -15,6 +15,10 @@ async function forward(req: NextRequest, path: string[]) {
   const url = `${BASE}/${path.join("/")}${req.nextUrl.search}`;
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (API_KEY) headers["X-API-Key"] = API_KEY;
+  // Forward the logged-in user's session so the backend knows who they are
+  // (e.g. to enforce demo read-only) and can answer /api/auth/me.
+  const session = req.cookies.get("af_session")?.value;
+  if (session) headers["Authorization"] = `Bearer ${session}`;
 
   const init: RequestInit = { method: req.method, headers, cache: "no-store" };
   if (!["GET", "HEAD"].includes(req.method)) {

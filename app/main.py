@@ -5,14 +5,16 @@ import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.api.auth import require_reviewer, require_staff
 from app.api import (
     alert_routes,
     assignee_routes,
+    auth_routes,
     audit_routes,
     carbon_routes,
     catalog_routes,
@@ -58,6 +60,16 @@ async def lifespan(_app: FastAPI):
         init_db()
     except Exception as exc:  # pragma: no cover - depends on runtime env
         logger.warning("Startup init_db skipped (%s); assuming schema already exists", exc)
+    # Ensure the DEMO account (and a real admin if configured) exist. Best-effort:
+    # a failure here (e.g. table not yet migrated) must never crash startup.
+    try:
+        from app.db import SessionLocal
+        from app.services import auth_service
+
+        with SessionLocal() as _db:
+            auth_service.seed_users(_db)
+    except Exception as exc:  # pragma: no cover - depends on runtime env
+        logger.warning("Startup user seeding skipped (%s)", exc)
     logger.info(
         "Agave Field Copilot started (env=%s, telegram=%s, whatsapp=%s, vision=%s)",
         settings.app_env,
@@ -83,6 +95,28 @@ app.add_middleware(
 )
 
 
+# Demo accounts are read-only. Enforced server-side (authoritative): any
+# write request carrying a valid demo session token is refused, so the demo
+# experience can never mutate the live dataset even if the UI guard is bypassed.
+_SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
+
+
+@app.middleware("http")
+async def demo_readonly_guard(request: Request, call_next):
+    if request.method not in _SAFE_METHODS and not request.url.path.startswith("/api/auth/"):
+        from app.services import auth_service
+
+        auth = request.headers.get("authorization") or ""
+        scheme, _, token = auth.partition(" ")
+        if scheme.lower() == "bearer" and token:
+            payload = auth_service.decode_token(token.strip())
+            if payload and payload.get("is_demo"):
+                return JSONResponse(
+                    {"detail": "Demo account is read-only."}, status_code=403
+                )
+    return await call_next(request)
+
+
 # Serve locally-stored images/thumbnails for the dashboard and message links.
 if settings.storage_provider.lower() == "local":
     Path(STORAGE_ROOT).mkdir(parents=True, exist_ok=True)
@@ -101,6 +135,7 @@ def health():
     }
 
 
+app.include_router(auth_routes.router)  # public: login / me / logout
 app.include_router(telegram_routes.router)
 app.include_router(whatsapp_routes.router)
 app.include_router(observation_routes.router)
