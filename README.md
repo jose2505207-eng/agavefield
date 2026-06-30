@@ -31,7 +31,9 @@ The app includes a demo account so the workflow can be tested immediately.
 ```txt
 Username: DEMO
 Password: DEMO
+
 ```
+https://agave-field.vercel.app/operations
 
 Demo mode includes realistic sample data for:
 
