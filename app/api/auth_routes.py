@@ -13,8 +13,10 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
+from app.config import settings
 from app.db import get_db
-from app.services import audit_service, auth_service
+from app.integrations import email_client
+from app.services import audit_service, auth_service, rbac_service
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -34,6 +36,23 @@ class UserOut(BaseModel):
 class LoginResponse(BaseModel):
     token: str
     user: UserOut
+
+
+class PasswordResetRequest(BaseModel):
+    username: str
+
+
+class PasswordResetConfirm(BaseModel):
+    token: str
+    new_password: str
+
+
+class RegisterRequest(BaseModel):
+    organization_name: str
+    username: str
+    password: str
+    full_name: Optional[str] = None
+    email: Optional[str] = None
 
 
 def _bearer(authorization: Optional[str]) -> Optional[str]:
@@ -125,3 +144,85 @@ def logout(
         )
         db.commit()
     return {"ok": True}
+
+
+# --------------------------------------------------------------------------- #
+# Password reset (no user enumeration)
+# --------------------------------------------------------------------------- #
+@router.post("/password-reset/request")
+def password_reset_request(
+    payload: PasswordResetRequest, request: Request, db: Session = Depends(get_db)
+):
+    """ALWAYS returns 200 ``{"ok": true}`` — the response never reveals whether
+    the username exists. When it does (and email is configured for the account)
+    a reset link is emailed; only a hash of the token is stored."""
+    username = (payload.username or "").strip()
+    ip = _client_ip(request)
+    user = auth_service.get_user(db, username)
+    if user and user.is_active:
+        raw = auth_service.create_password_reset(db, user)
+        if user.email and email_client.is_live():
+            link = f"{settings.app_base_url.rstrip('/')}/reset-password/{raw}"
+            try:
+                email_client.send_email(
+                    user.email,
+                    "Reset your Agave Field password",
+                    f"Use this link to reset your password: {link}\n\n"
+                    f"It expires in {settings.password_reset_ttl_hours} hours. "
+                    "If you did not request this, you can ignore this email.",
+                )
+            except Exception:  # pragma: no cover - never crash on email failure
+                pass
+        audit_service.log(
+            db, entity_type="app_user", entity_id=user.id,
+            action="password_reset_requested", changed_by=username, ip_address=ip,
+        )
+        db.commit()
+    return {"ok": True}
+
+
+@router.post("/password-reset/confirm")
+def password_reset_confirm(
+    payload: PasswordResetConfirm, request: Request, db: Session = Depends(get_db)
+):
+    """Validate the reset token + expiry, set the new password, invalidate the
+    token, and revoke existing sessions. Returns ``{"ok": bool, "reason"?}``."""
+    result = auth_service.reset_password(db, payload.token, payload.new_password)
+    if result.get("ok"):
+        audit_service.log(
+            db, entity_type="app_user", entity_id=result.get("user_id"),
+            action="password_reset", changed_by=result.get("username"),
+            ip_address=_client_ip(request),
+        )
+        db.commit()
+    return result
+
+
+# --------------------------------------------------------------------------- #
+# New-tenant self-signup (creates a brand-new organization + first admin)
+# --------------------------------------------------------------------------- #
+@router.post("/register", response_model=LoginResponse, status_code=201)
+def register(payload: RegisterRequest, request: Request, db: Session = Depends(get_db)):
+    """Onboard a NEW tenant: a fresh organization, a first admin AppUser, and an
+    admin membership. Joining an existing org stays invite-gated. On success the
+    new admin is issued a session so they are logged straight in."""
+    result = rbac_service.register_new_tenant(
+        db,
+        organization_name=payload.organization_name,
+        username=payload.username,
+        password=payload.password,
+        full_name=payload.full_name,
+        email=payload.email,
+    )
+    if not result.get("ok"):
+        reason = result.get("reason", "invalid")
+        status = 409 if reason == "username_taken" else 400
+        raise HTTPException(status, f"Registration failed: {reason}")
+    user = auth_service.get_user(db, result["username"])
+    token, _session = auth_service.create_session(db, user)
+    audit_service.log(
+        db, entity_type="app_user", entity_id=user.id, action="register",
+        changed_by=user.username, ip_address=_client_ip(request),
+    )
+    db.commit()
+    return {"token": token, "user": auth_service.public_user(user)}

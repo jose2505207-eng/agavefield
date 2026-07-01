@@ -7,6 +7,7 @@ readiness from the dashboard.
 from __future__ import annotations
 
 import logging
+from typing import Optional
 
 from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
@@ -24,7 +25,7 @@ from app.models.operations import (
 logger = logging.getLogger("agave.status")
 
 
-def status(db: Session) -> dict:
+def status(db: Session, wo_ids: Optional[list] = None) -> dict:
     try:
         db.execute(text("SELECT 1"))
         db_ok = True
@@ -50,6 +51,23 @@ def status(db: Session) -> dict:
             stmt = stmt.where(getattr(model, k) == v)
         return db.scalar(stmt) or 0
 
+    # Org/data-scope-aware counts. ``wo_ids is None`` → no membership resolved
+    # (open / API-key / legacy) → unscoped totals, unchanged behaviour. A list
+    # restricts the work-order / execution counts to what the caller may see.
+    def _wo_count():
+        stmt = select(func.count(WorkOrder.id))
+        if wo_ids is not None:
+            stmt = stmt.where(WorkOrder.id.in_(wo_ids))
+        return db.scalar(stmt) or 0
+
+    def _exec_count(**f):
+        stmt = select(func.count(ExecutionRecord.id))
+        for k, v in f.items():
+            stmt = stmt.where(getattr(ExecutionRecord, k) == v)
+        if wo_ids is not None:
+            stmt = stmt.where(ExecutionRecord.work_order_id.in_(wo_ids))
+        return db.scalar(stmt) or 0
+
     return {
         "app_env": settings.app_env,
         "app_base_url": settings.app_base_url,
@@ -63,9 +81,9 @@ def status(db: Session) -> dict:
             "products": _count(Product),
             "activities": _count(Activity),
             "assignees": _count(Assignee),
-            "work_orders": _count(WorkOrder),
-            "executions": _count(ExecutionRecord),
-            "pending_review": _count(ExecutionRecord, compliance_status="pending_review"),
+            "work_orders": _wo_count(),
+            "executions": _exec_count(),
+            "pending_review": _exec_count(compliance_status="pending_review"),
         },
         "go_live_ready": all([
             db_ok, storage_configured, email_configured,

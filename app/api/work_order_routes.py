@@ -7,6 +7,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
+from app.api.rbac import scope_context
 from app.db import get_db
 from app.models.ops_schemas import (
     WorkOrderCreate,
@@ -15,7 +16,7 @@ from app.models.ops_schemas import (
     WorkOrderRead,
     WorkOrderUpdate,
 )
-from app.services import work_order_service
+from app.services import rbac_service, work_order_service
 
 router = APIRouter(prefix="/api/work-orders", tags=["work-orders"])
 
@@ -28,8 +29,14 @@ def _detail(db: Session, wo) -> WorkOrderDetail:
 
 @router.get("", response_model=list[WorkOrderRead])
 def list_work_orders(status: Optional[str] = None, limit: int = Query(200, le=500),
-                     db: Session = Depends(get_db)):
-    return work_order_service.list_work_orders(db, status=status, limit=limit)
+                     db: Session = Depends(get_db),
+                     ctx: dict = Depends(scope_context)):
+    rows = work_order_service.list_work_orders(db, status=status, limit=limit)
+    # Authoritative data-visibility filter: a logged-in member only ever receives
+    # rows their data_scope allows. No membership (open / API-key mode) → unchanged.
+    return rbac_service.filter_work_orders_by_scope(
+        ctx["member"], rows, is_demo=ctx["is_demo"]
+    )
 
 
 @router.get("/{work_order_id}", response_model=WorkOrderDetail)

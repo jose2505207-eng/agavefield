@@ -29,13 +29,16 @@ logger = logging.getLogger("agave.review")
 _OPEN = ("pending_review", "needs_correction")
 
 
-def review_queue(db: Session, limit: int = 200) -> list[ExecutionRecord]:
+def review_queue(db: Session, limit: int = 200, wo_ids: Optional[list] = None) -> list[ExecutionRecord]:
+    stmt = select(ExecutionRecord).where(ExecutionRecord.compliance_status.in_(_OPEN))
+    # Org/data-scope filtering: ``wo_ids is None`` means no membership resolved
+    # (open / API-key / legacy) → unfiltered, unchanged behaviour. A list limits
+    # the queue to work orders the caller may see (possibly empty).
+    if wo_ids is not None:
+        stmt = stmt.where(ExecutionRecord.work_order_id.in_(wo_ids))
     return list(
         db.execute(
-            select(ExecutionRecord)
-            .where(ExecutionRecord.compliance_status.in_(_OPEN))
-            .order_by(ExecutionRecord.submitted_at.desc())
-            .limit(limit)
+            stmt.order_by(ExecutionRecord.submitted_at.desc()).limit(limit)
         )
         .scalars()
         .all()

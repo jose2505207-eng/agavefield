@@ -173,8 +173,22 @@ def _mint_link(wo: WorkOrder) -> dict:
     raw_token = secrets.token_urlsafe(32)
     wo.secure_access_token_hash = hash_token(raw_token)
     wo.secure_link_expires_at = datetime.utcnow() + timedelta(days=settings.work_order_link_expiry_days)
-    link = f"{settings.app_base_url.rstrip('/')}/work-orders/complete/{raw_token}"
+    link = _completion_link(raw_token)
     return {"token": raw_token, "link": link, "expires_at": wo.secure_link_expires_at}
+
+
+def _completion_link(raw_token: str) -> str:
+    """Build the worker completion URL for a raw token.
+
+    Prefer the Next.js `web/` worker page when a frontend URL is configured
+    (`{web_app_base_url}/complete/{token}`); otherwise fall back to the backend's
+    self-contained mobile page (`{app_base_url}/work-orders/complete/{token}`),
+    which works standalone with no frontend deploy.
+    """
+    web_base = (settings.web_app_base_url or "").rstrip("/")
+    if web_base:
+        return f"{web_base}/complete/{raw_token}"
+    return f"{settings.app_base_url.rstrip('/')}/work-orders/complete/{raw_token}"
 
 
 def generate_link(db: Session, work_order_id: int, actor: Optional[str] = None) -> Optional[dict]:

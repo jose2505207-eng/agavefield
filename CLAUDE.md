@@ -45,6 +45,16 @@ compliance lead. The product equation:
   `audit_service.py` (append-only audit), `catalog_service.py` (history-safe CRUD).
 - Routes: `/api/products`, `/api/activities`, `/api/assignees`, `/api/audit/...`.
 - Agronomy base: `Farm`(=field), `Lot`, `FieldZone`(=zone), `AgavePassport`.
+- **Organization RBAC** (multi-user profiles): `Organization`, `OrganizationMember`
+  (role + 10 normalized permission booleans + `data_scope`), `Invitation`
+  (hash-only tokens, expiry, max-uses). Resolution/enforcement in
+  `app/services/rbac_service.py`, deps in `app/api/rbac.py`, endpoints in
+  `app/api/org_routes.py` (`/api/org/context|members|invitations`). Data
+  visibility is filtered **server-side** by `data_scope`; a **member read-only
+  guard** in `app/main.py` blocks writes by auditor/worker roles (twin of the
+  demo guard). Roles seed defaults but permissions are per-member overridable —
+  read the stored booleans, never the role string. Full spec: `docs/RBAC.md`.
+  Migration head: **`b4b8620239bc`** (baseline `49fa233d5c67`).
 
 ## Module boundary (two subsystems)
 This app hosts **two overlapping domains on one DB/app**. Know which you're in

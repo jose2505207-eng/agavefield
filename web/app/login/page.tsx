@@ -1,6 +1,7 @@
 "use client";
 
 import { Suspense, useState } from "react";
+import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Leaf, LogIn } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -62,7 +63,12 @@ function LoginForm() {
             />
           </div>
           <div>
-            <label className="mb-1 block text-xs font-medium text-ink-soft">Password</label>
+            <div className="mb-1 flex items-center justify-between">
+              <label className="block text-xs font-medium text-ink-soft">Password</label>
+              <Link href="/reset-password" className="text-xs font-medium text-agave hover:text-agave-deep">
+                Forgot password?
+              </Link>
+            </div>
             <input
               className={input}
               type="password"
@@ -76,7 +82,16 @@ function LoginForm() {
             <LogIn className="h-4 w-4" /> {busy ? "Signing in…" : "Sign in"}
           </Button>
           <p className="text-center text-xs text-ink-muted">
-            Demo access: <span className="font-mono">DEMO</span> / <span className="font-mono">DEMO</span> (read-only)
+            New here?{" "}
+            <Link href="/signup" className="font-medium text-agave hover:text-agave-deep">
+              Create an organization
+            </Link>{" "}
+            — joining an existing org is invite-only.
+          </p>
+          <p className="text-center text-xs text-ink-muted">
+            Demo access: <span className="font-mono">DEMO</span> / <span className="font-mono">DEMO</span> (read-only).
+            After signing in, use the demo profile switcher to explore the worker,
+            supervisor, engineer, admin and auditor roles.
           </p>
         </form>
       </div>

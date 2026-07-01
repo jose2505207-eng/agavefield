@@ -68,6 +68,11 @@ class Settings(BaseSettings):
     # sessions. NOT used for work-order link hashing (those use keyless sha256).
     secret_key: str = "dev-insecure-change-me"  # override in prod
     app_base_url: str = "http://localhost:8000"  # used for secure work-order links
+    # Public URL of the Next.js `web/` frontend. When set, emailed work-order
+    # links open the polished web worker page (`{web_app_base_url}/complete/{token}`);
+    # when empty they fall back to the backend's self-contained HTML page
+    # (`{app_base_url}/work-orders/complete/{token}`), which needs no frontend deploy.
+    web_app_base_url: str = ""
 
     # Role-based access (API keys). If ALL are empty, auth is OPEN (dev mode);
     # set at least one in production to enforce RBAC on the ops admin endpoints.
@@ -85,6 +90,14 @@ class Settings(BaseSettings):
     demo_password: str = "DEMO"
     auth_admin_username: str = ""
     auth_admin_password: str = ""
+
+    # When true AND a live email provider is configured, invitations carrying an
+    # `invited_email` require a one-time verification code (emailed to that
+    # address) at acceptance. Off by default; when email is not configured the
+    # flow degrades gracefully to plain email-match binding (never crashes).
+    require_invite_email_verification: bool = False
+    # Lifetime of a password-reset token (hash + expiry stored on the AppUser).
+    password_reset_ttl_hours: int = 2
 
     # Email delivery for work-order links.
     email_provider: str = "console"  # console | smtp | sendgrid | resend

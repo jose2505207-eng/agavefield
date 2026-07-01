@@ -7,7 +7,11 @@ import { NextRequest, NextResponse } from "next/server";
 // is the UX gate.
 const PUBLIC_PREFIXES = [
   "/login",
+  "/signup", // public new-tenant self-signup
+  "/reset-password", // public password-reset request + confirm
   "/complete", // token-based worker page — must stay public
+  "/invite", // public invitation-accept page (token-based)
+  "/access-denied", // standalone restricted-access notice
   "/api/", // Next route handlers (login/logout)
   "/proxy/", // backend proxy
   "/_next/",

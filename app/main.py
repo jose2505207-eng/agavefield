@@ -21,6 +21,7 @@ from app.api import (
     completion_routes,
     execution_routes,
     ops_photo_routes,
+    org_routes,
     review_routes,
     season_routes,
     system_routes,
@@ -70,6 +71,16 @@ async def lifespan(_app: FastAPI):
             auth_service.seed_users(_db)
     except Exception as exc:  # pragma: no cover - depends on runtime env
         logger.warning("Startup user seeding skipped (%s)", exc)
+    # Seed the demo organization + five role profiles so the RBAC system is
+    # explorable out of the box. Best-effort; never crashes startup.
+    try:
+        from app.db import SessionLocal
+        from app.services import demo_seed_service
+
+        with SessionLocal() as _db:
+            demo_seed_service.seed_demo_org(_db)
+    except Exception as exc:  # pragma: no cover - depends on runtime env
+        logger.warning("Startup demo RBAC seeding skipped (%s)", exc)
     logger.info(
         "Agave Field Copilot started (env=%s, telegram=%s, whatsapp=%s, vision=%s)",
         settings.app_env,
@@ -117,6 +128,43 @@ async def demo_readonly_guard(request: Request, call_next):
     return await call_next(request)
 
 
+# Read-only ORGANIZATION ROLES (auditor, bare worker) are also blocked from
+# mutating requests server-side — the authoritative twin of the demo guard.
+# A member with no write-capable permission may never POST/PATCH/DELETE, even if
+# the UI lets them try. Non-members and write-capable roles are unaffected.
+# Exempt: auth endpoints and the public invite-accept (anonymous → no member).
+_MEMBER_GUARD_EXEMPT = ("/api/auth/", "/api/org/invitations/accept")
+
+
+@app.middleware("http")
+async def member_readonly_guard(request: Request, call_next):
+    if request.method not in _SAFE_METHODS and not any(
+        request.url.path.startswith(p) for p in _MEMBER_GUARD_EXEMPT
+    ):
+        auth = request.headers.get("authorization") or ""
+        scheme, _, token = auth.partition(" ")
+        if scheme.lower() == "bearer" and token:
+            from app.services import auth_service, rbac_service
+
+            payload = auth_service.decode_token(token.strip())
+            # Demo tokens are already handled by demo_readonly_guard; only do the
+            # (DB-touching) membership lookup for real sessions.
+            if payload and not payload.get("is_demo"):
+                from app.db import SessionLocal
+
+                try:
+                    with SessionLocal() as db:
+                        member = rbac_service.membership_from_token(db, token.strip())
+                        if rbac_service.is_read_only(member):
+                            return JSONResponse(
+                                {"detail": "Read-only role: writes are not permitted."},
+                                status_code=403,
+                            )
+                except Exception:  # pragma: no cover - never block on guard failure
+                    pass
+    return await call_next(request)
+
+
 # Serve locally-stored images/thumbnails for the dashboard and message links.
 if settings.storage_provider.lower() == "local":
     Path(STORAGE_ROOT).mkdir(parents=True, exist_ok=True)
@@ -136,6 +184,7 @@ def health():
 
 
 app.include_router(auth_routes.router)  # public: login / me / logout
+app.include_router(org_routes.router)   # session-auth: org/members/invitations/context
 app.include_router(telegram_routes.router)
 app.include_router(whatsapp_routes.router)
 app.include_router(observation_routes.router)

@@ -163,6 +163,61 @@ def revoke_all_for_user(db: Session, username: str) -> int:
     return int(result.rowcount or 0)
 
 
+# --------------------------------------------------------------------------- #
+# Password reset (hash-only token + expiry on the AppUser)
+# --------------------------------------------------------------------------- #
+def _hash_reset_token(token: str) -> str:
+    """Keyless SHA-256 — only the hash of a reset token is ever stored."""
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def _naive_utc_now() -> datetime:
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+def create_password_reset(
+    db: Session, user: AppUser, ttl_hours: Optional[int] = None
+) -> str:
+    """Issue a password-reset token for ``user``; store only its hash + expiry.
+
+    Returns the raw token (delivered out-of-band via email). Does not commit —
+    the caller owns the transaction boundary."""
+    ttl = ttl_hours if ttl_hours is not None else settings.password_reset_ttl_hours
+    raw = secrets.token_urlsafe(32)
+    user.password_reset_token_hash = _hash_reset_token(raw)
+    user.password_reset_expires_at = _naive_utc_now() + timedelta(hours=ttl)
+    db.flush()
+    return raw
+
+
+def reset_password(db: Session, token: Optional[str], new_password: str) -> dict:
+    """Validate a reset token, set the new password, invalidate the token, and
+    revoke all of the user's sessions. Returns ``{"ok": bool, "reason"?}``."""
+    if not token:
+        return {"ok": False, "reason": "invalid_token"}
+    if not new_password or len(new_password) < 8:
+        return {"ok": False, "reason": "weak_password"}
+    token_hash = _hash_reset_token(token)
+    user = db.execute(
+        select(AppUser).where(AppUser.password_reset_token_hash == token_hash)
+    ).scalar_one_or_none()
+    if user is None or not user.is_active:
+        return {"ok": False, "reason": "invalid_token"}
+    exp = user.password_reset_expires_at
+    if exp is not None and exp.tzinfo is not None:
+        exp = exp.astimezone(timezone.utc).replace(tzinfo=None)
+    if exp is None or exp < _naive_utc_now():
+        return {"ok": False, "reason": "expired"}
+    user.password_hash = hash_password(new_password)
+    user.password_reset_token_hash = None
+    user.password_reset_expires_at = None
+    db.flush()
+    # Revoke every live session so a leaked/compromised session can't survive a
+    # reset ("log out everywhere" is implicit in a password change).
+    revoke_all_for_user(db, user.username)
+    return {"ok": True, "username": user.username, "user_id": user.id}
+
+
 def public_user(user: AppUser) -> dict:
     return {
         "username": user.username,

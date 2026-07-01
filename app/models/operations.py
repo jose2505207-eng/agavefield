@@ -138,6 +138,10 @@ class WorkOrder(Base, TimestampMixin):
     zone_id: Mapped[Optional[int]] = mapped_column(ForeignKey("field_zones.id"))
     agave_passport_id: Mapped[Optional[int]] = mapped_column(ForeignKey("agave_passports.id"))
     season_id: Mapped[Optional[int]] = mapped_column(Integer)  # optional, no Season table in MVP
+    # Multi-tenant ownership. Plain nullable Integer (not a DB-level FK) mirrors
+    # season_id, keeping the additive migration SQLite-safe. NULL = legacy /
+    # single-tenant rows (visible to non-demo members; never to demo members).
+    organization_id: Mapped[Optional[int]] = mapped_column(Integer, index=True)
 
     planned_start_date: Mapped[Optional[datetime]] = mapped_column(DateTime)
     due_date: Mapped[Optional[datetime]] = mapped_column(DateTime)
@@ -372,6 +376,116 @@ class AppUser(Base, TimestampMixin):
     is_demo: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     last_login_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
+    # Primary organization for login resolution. Authoritative org/role/permission
+    # data lives on OrganizationMember; this is just the fast-path pointer to the
+    # member's home org. Plain nullable Integer (additive, SQLite-safe).
+    organization_id: Mapped[Optional[int]] = mapped_column(Integer, index=True)
+
+    # Contact address used for password-reset delivery and (future) email
+    # verification. Nullable/additive — legacy accounts have no email on file.
+    email: Mapped[Optional[str]] = mapped_column(String(255), index=True)
+    email_verified: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Password-reset: only a SHA-256 HASH of the reset token is stored (same
+    # scheme as work-order links), alongside a short expiry. Cleared on use.
+    password_reset_token_hash: Mapped[Optional[str]] = mapped_column(String(128), index=True)
+    password_reset_expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
+
+
+# --------------------------------------------------------------------------- #
+# Organizations / RBAC (multi-user profiles + permissions)
+# --------------------------------------------------------------------------- #
+class Organization(Base, TimestampMixin):
+    """A tenant: a ranch business / cooperative that owns members + field data.
+
+    Multi-tenant-ready foundation. Work orders carry an ``organization_id`` so
+    data visibility can be isolated per org; legacy rows (NULL org) remain
+    visible to non-demo members for backward compatibility.
+    """
+
+    __tablename__ = "organizations"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(255))
+    slug: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    description: Mapped[Optional[str]] = mapped_column(Text)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+
+
+class OrganizationMember(Base, TimestampMixin):
+    """Links an ``AppUser`` to an ``Organization`` with a role, an effective
+    permission set, and a data-visibility scope.
+
+    Permissions are stored as normalized booleans (not derived from the role at
+    read time) so a member can be granted/revoked individual capabilities that
+    diverge from their role template (e.g. an engineer who may review but not
+    invite). The role is retained for labelling, dashboards, and re-seeding
+    defaults.
+
+    Data scope (``self|team|ranch|organization``) plus the JSON scope-ref lists
+    drive server-side row filtering in ``rbac_service.filter_work_orders_by_scope``.
+    """
+
+    __tablename__ = "organization_members"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    app_user_id: Mapped[int] = mapped_column(ForeignKey("app_users.id"), index=True)
+
+    # worker | supervisor | engineer | admin | auditor
+    role: Mapped[str] = mapped_column(String(24), default="worker", index=True)
+
+    # --- normalized permission set (effective; role template + overrides) ---
+    can_invite_members: Mapped[bool] = mapped_column(Boolean, default=False)
+    can_create_work_orders: Mapped[bool] = mapped_column(Boolean, default=False)
+    can_assign_work_orders: Mapped[bool] = mapped_column(Boolean, default=False)
+    can_review_work_orders: Mapped[bool] = mapped_column(Boolean, default=False)
+    can_manage_catalogs: Mapped[bool] = mapped_column(Boolean, default=False)
+    can_view_reports: Mapped[bool] = mapped_column(Boolean, default=False)
+    can_view_labor_analytics: Mapped[bool] = mapped_column(Boolean, default=False)
+    can_manage_org_settings: Mapped[bool] = mapped_column(Boolean, default=False)
+    can_manage_members: Mapped[bool] = mapped_column(Boolean, default=False)
+    can_export_data: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    # self | team | ranch | organization
+    data_scope: Mapped[str] = mapped_column(String(16), default="self")
+    # Scope refs (JSON lists; filtered in Python to stay DB-agnostic).
+    scope_ranch_ids: Mapped[Optional[list]] = mapped_column(JSON)        # farm ids
+    scope_lot_ids: Mapped[Optional[list]] = mapped_column(JSON)          # lot ids
+    scope_assignee_emails: Mapped[Optional[list]] = mapped_column(JSON)  # WO assignee emails
+
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+
+
+class Invitation(Base, TimestampMixin):
+    """A tokenized invitation to join an organization with a preset role/perms.
+
+    Security mirrors work-order links: a random token is returned to the creator
+    exactly once; only its SHA-256 hash is stored. Invitations expire, can be
+    revoked, and have a max-use count. Acceptance creates (or links) an AppUser
+    plus an OrganizationMember and is audit-logged.
+    """
+
+    __tablename__ = "invitations"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    invited_email: Mapped[Optional[str]] = mapped_column(String(255), index=True)
+    invited_role: Mapped[str] = mapped_column(String(24), default="worker")
+    invited_permissions: Mapped[Optional[dict]] = mapped_column(JSON)  # override booleans
+    invited_data_scope: Mapped[str] = mapped_column(String(16), default="self")
+
+    token_hash: Mapped[str] = mapped_column(String(128), index=True)
+    # Optional email-verification code (config-gated). Only a SHA-256 hash of the
+    # short code is stored; the plaintext is delivered to the invited address.
+    verification_code_hash: Mapped[Optional[str]] = mapped_column(String(128))
+    created_by_user_id: Mapped[Optional[int]] = mapped_column(ForeignKey("app_users.id"))
+    expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
+    max_uses: Mapped[int] = mapped_column(Integer, default=1)
+    used_count: Mapped[int] = mapped_column(Integer, default=0)
+    used_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
+    accepted_by_user_id: Mapped[Optional[int]] = mapped_column(ForeignKey("app_users.id"))
+    # pending | accepted | expired | revoked
+    status: Mapped[str] = mapped_column(String(16), default="pending", index=True)
 
 
 class AppSession(Base, TimestampMixin):

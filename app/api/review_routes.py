@@ -4,16 +4,19 @@ from __future__ import annotations
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
+from app.api.rbac import scope_context
 from app.db import get_db
 from app.models.ops_schemas import ExecutionRead, ReviewAction
-from app.services import review_service
+from app.services import rbac_service, review_service
 
 router = APIRouter(prefix="/api", tags=["review"])
 
 
 @router.get("/review-queue", response_model=list[ExecutionRead])
-def review_queue(limit: int = Query(200, le=500), db: Session = Depends(get_db)):
-    return review_service.review_queue(db, limit=limit)
+def review_queue(limit: int = Query(200, le=500), db: Session = Depends(get_db),
+                 ctx: dict = Depends(scope_context)):
+    wo_ids = rbac_service.allowed_work_order_ids(db, ctx["member"], is_demo=ctx["is_demo"])
+    return review_service.review_queue(db, limit=limit, wo_ids=wo_ids)
 
 
 def _act(fn, execution_record_id: int, payload: ReviewAction, db: Session):

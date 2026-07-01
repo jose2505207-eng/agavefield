@@ -32,6 +32,74 @@ export async function getMe(): Promise<AuthUser> {
   return res.json();
 }
 
+// ---- Organization RBAC ----
+import type { Invitation, Member, OrgContext, OrgRole, DataScope } from "./rbac";
+
+export async function getContext(): Promise<OrgContext> {
+  return apiGet("/api/org/context");
+}
+
+export const listMembers = (): Promise<Member[]> => apiGet("/api/org/members");
+export const updateMember = (id: number, body: unknown) =>
+  apiSend("PATCH", `/api/org/members/${id}`, body);
+export const deactivateMember = (id: number) =>
+  apiSend("POST", `/api/org/members/${id}/deactivate`);
+
+export const listInvitations = (): Promise<Invitation[]> => apiGet("/api/org/invitations");
+export const createInvitation = (body: {
+  invited_role: OrgRole;
+  invited_email?: string;
+  data_scope?: DataScope;
+  expires_in_days?: number;
+  max_uses?: number;
+  permissions?: Record<string, boolean>;
+}): Promise<Invitation> => apiSend("POST", "/api/org/invitations", body);
+export const revokeInvitation = (id: number) =>
+  apiSend("POST", `/api/org/invitations/${id}/revoke`);
+
+export async function validateInvitation(token: string): Promise<any> {
+  const res = await fetch(`/proxy/api/org/invitations/validate/${token}`, { cache: "no-store" });
+  if (!res.ok) throw new Error(`validate failed (${res.status})`);
+  return res.json();
+}
+export const acceptInvitation = (body: {
+  token: string;
+  username: string;
+  password?: string;
+  full_name?: string;
+  // Optional email-bound acceptance fields. Sent only when the validate response
+  // indicates the invite is bound to an email / requires a code. Backends that
+  // don't yet model these ignore the extra keys (Pydantic ignores extras).
+  email?: string;
+  verification_code?: string;
+}) => apiSend("POST", "/api/org/invitations/accept", body);
+
+// ---- Auth: password reset + new-tenant self-signup ----
+// These call the backend /api/auth/* endpoints through the proxy. The endpoints
+// may not exist on every deployment yet; callers degrade gracefully on error.
+
+// Request a reset link/code. The UI ALWAYS shows a neutral success message
+// regardless of the outcome to avoid username enumeration, so this resolves even
+// when the backend responds with an error (the caller ignores the result).
+export async function requestPasswordReset(username: string): Promise<void> {
+  try {
+    await apiSend("POST", "/api/auth/password-reset/request", { username });
+  } catch {
+    /* swallow — neutral response is intentional (no enumeration) */
+  }
+}
+
+export const confirmPasswordReset = (token: string, new_password: string) =>
+  apiSend("POST", "/api/auth/password-reset/confirm", { token, new_password });
+
+export const registerOrganization = (body: {
+  organization_name: string;
+  username: string;
+  password: string;
+  full_name?: string;
+  email?: string;
+}): Promise<any> => apiSend("POST", "/api/auth/register", body);
+
 export async function loginRequest(username: string, password: string): Promise<AuthUser> {
   const res = await fetch("/api/login", {
     method: "POST",
@@ -135,6 +203,8 @@ export const listWorkOrders = () => apiGet("/api/work-orders");
 export const listProducts = () => apiGet("/api/products?include_inactive=false");
 export const listActivities = () => apiGet("/api/activities?include_inactive=false");
 export const listAssignees = () => apiGet("/api/assignees?include_inactive=false");
+export const createProduct = (body: unknown) => apiSend("POST", "/api/products", body);
+export const createActivity = (body: unknown) => apiSend("POST", "/api/activities", body);
 export const createWorkOrder = (body: unknown) => apiSend("POST", "/api/work-orders", body);
 export const sendWorkOrder = (id: number) => apiSend("POST", `/api/work-orders/${id}/send`);
 

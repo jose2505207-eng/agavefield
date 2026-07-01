@@ -9,7 +9,7 @@ import { StatusBadge } from "@/components/status-badge";
 import { EmptyState } from "@/components/empty-state";
 import { DemoBadge } from "@/components/demo-badge";
 import {
-  getWorkOrders, listActivities, listAssignees, createWorkOrder, sendWorkOrder,
+  getWorkOrders, listActivities, listAssignees, listProducts, createWorkOrder, sendWorkOrder,
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { DEMO_WORK_ORDERS } from "@/lib/demo";
@@ -20,6 +20,7 @@ export default function WorkOrdersPage() {
   const { isDemo, loading: authLoading } = useAuth();
   const [rows, setRows] = useState<any[] | null>(null);
   const [activities, setActivities] = useState<any[]>([]);
+  const [products, setProducts] = useState<any[]>([]);
   const [assignees, setAssignees] = useState<any[]>([]);
   const [showForm, setShowForm] = useState(false);
   const [msg, setMsg] = useState<{ text: string; ok: boolean } | null>(null);
@@ -28,12 +29,16 @@ export default function WorkOrdersPage() {
     if (isDemo) {
       setRows(DEMO_WORK_ORDERS);
       setActivities([]);
+      setProducts([]);
       setAssignees([]);
       return;
     }
     try {
-      const [wo, acts, asg] = await Promise.all([getWorkOrders(false), listActivities(), listAssignees()]);
+      const [wo, acts, prods, asg] = await Promise.all([
+        getWorkOrders(false), listActivities(), listProducts(), listAssignees(),
+      ]);
       setActivities(Array.isArray(acts) ? acts : []);
+      setProducts(Array.isArray(prods) ? prods : []);
       setAssignees(Array.isArray(asg) ? asg : []);
       setRows(wo.data);
     } catch {
@@ -73,6 +78,7 @@ export default function WorkOrdersPage() {
       {showForm && (
         <NewWorkOrderForm
           activities={activities}
+          products={products}
           assignees={assignees}
           onCancel={() => setShowForm(false)}
           onCreated={(code) => { setShowForm(false); setMsg({ text: `Created ${code}`, ok: true }); load(); }}
@@ -115,20 +121,24 @@ export default function WorkOrdersPage() {
   );
 }
 
-function NewWorkOrderForm({ activities, assignees, onCancel, onCreated, onError }: {
-  activities: any[]; assignees: any[];
+function NewWorkOrderForm({ activities, products, assignees, onCancel, onCreated, onError }: {
+  activities: any[]; products: any[]; assignees: any[];
   onCancel: () => void; onCreated: (code: string) => void; onError: (t: string) => void;
 }) {
   const [title, setTitle] = useState("");
   const [lot, setLot] = useState("");
   const [due, setDue] = useState("");
   const [activityId, setActivityId] = useState(activities[0]?.id ? String(activities[0].id) : "");
+  const [productId, setProductId] = useState("");
   const [assigneeId, setAssigneeId] = useState("");
   const [surface, setSurface] = useState("");
   const [surfaceUnit, setSurfaceUnit] = useState("ha");
+  const [totalProduct, setTotalProduct] = useState("");
+  const [totalProductUnit, setTotalProductUnit] = useState("kg");
   const [photos, setPhotos] = useState("1");
   const [busy, setBusy] = useState(false);
 
+  const selectedProduct = products.find((p) => String(p.id) === productId);
   const canSubmit = title && activityId && !busy;
 
   async function submit() {
@@ -141,8 +151,11 @@ function NewWorkOrderForm({ activities, assignees, onCancel, onCreated, onError 
         assigned_to_id: asg?.id ?? null, assigned_to_email: asg?.email ?? null,
         items: [{
           activity_id: Number(activityId),
+          product_id: productId ? Number(productId) : null,
           planned_surface_area_value: surface ? Number(surface) : null,
           planned_surface_area_unit: surfaceUnit,
+          planned_total_product_value: productId && totalProduct ? Number(totalProduct) : null,
+          planned_total_product_unit: productId ? totalProductUnit : null,
           required_photo_count: Number(photos) || 0,
         }],
       };
@@ -159,7 +172,7 @@ function NewWorkOrderForm({ activities, assignees, onCancel, onCreated, onError 
       <CardContent className="py-5">
         {activities.length === 0 && (
           <p className="mb-4 rounded-xl bg-[#FBEFD9] p-3 text-sm text-warn">
-            No activities in the catalog yet — add activities (with carbon factors) before creating work orders.
+            No activities in the catalog yet — add activities (with carbon factors) in Catalogs before creating work orders.
           </p>
         )}
         <div className="grid gap-4 sm:grid-cols-2">
@@ -171,6 +184,11 @@ function NewWorkOrderForm({ activities, assignees, onCancel, onCreated, onError 
             <select className={input} value={activityId} onChange={(e) => setActivityId(e.target.value)}>
               <option value="">Select…</option>
               {activities.map((a) => <option key={a.id} value={a.id}>{a.activity_name}</option>)}
+            </select></div>
+          <div><label className={label}>Product {products.length === 0 ? "(none in catalog)" : "(optional)"}</label>
+            <select className={input} value={productId} onChange={(e) => setProductId(e.target.value)} disabled={products.length === 0}>
+              <option value="">(no product)</option>
+              {products.map((p) => <option key={p.id} value={p.id}>{p.product_name}</option>)}
             </select></div>
           <div><label className={label}>Assign to</label>
             <select className={input} value={assigneeId} onChange={(e) => setAssigneeId(e.target.value)}>
@@ -184,8 +202,24 @@ function NewWorkOrderForm({ activities, assignees, onCancel, onCreated, onError 
                 <option value="ha">ha</option><option value="m2">m²</option>
               </select>
             </div></div>
+          {productId && (
+            <div><label className={label}>Planned total product</label>
+              <div className="flex gap-2">
+                <input className={input} value={totalProduct} onChange={(e) => setTotalProduct(e.target.value)} type="number" step="any"
+                  placeholder={selectedProduct?.default_dose_value ? `dose ${selectedProduct.default_dose_value} ${selectedProduct.default_dose_unit || ""}` : ""} />
+                <select className="rounded-xl border border-line bg-white px-2 text-sm" value={totalProductUnit} onChange={(e) => setTotalProductUnit(e.target.value)}>
+                  <option value="kg">kg</option><option value="l">L</option>
+                </select>
+              </div></div>
+          )}
           <div><label className={label}>Required photos</label><input className={input} value={photos} onChange={(e) => setPhotos(e.target.value)} type="number" min="0" /></div>
         </div>
+        {selectedProduct && (
+          <p className="mt-3 rounded-xl bg-agave-light p-3 text-xs text-agave-deep">
+            Carbon factor {selectedProduct.carbon_factor_value != null ? `${selectedProduct.carbon_factor_value} ${selectedProduct.carbon_factor_unit || ""}` : "not set"} —
+            {" "}locked as a snapshot on this work order at creation.
+          </p>
+        )}
         <div className="mt-4 flex justify-end gap-2">
           <Button variant="ghost" onClick={onCancel}>Cancel</Button>
           <Button disabled={!canSubmit} onClick={submit}>{busy ? "Creating…" : "Create work order"}</Button>

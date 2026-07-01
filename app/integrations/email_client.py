@@ -123,6 +123,16 @@ def get_email_provider() -> EmailProvider:
     return ConsoleEmailProvider()
 
 
+def is_live() -> bool:
+    """True when a real (non-console) email provider is configured.
+
+    Used to gate optional email steps (e.g. invitation verification codes,
+    password-reset delivery) so they degrade gracefully — never crash — when no
+    live provider is set up (the resolver falls back to the console provider).
+    """
+    return get_email_provider().name != "console"
+
+
 def send_email(to: str, subject: str, body: str) -> tuple[bool, str]:
     """Send via the configured provider. Returns (delivered, provider_name)."""
     provider = get_email_provider()

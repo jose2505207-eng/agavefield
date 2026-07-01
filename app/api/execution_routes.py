@@ -7,10 +7,11 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.api.rbac import scope_context
 from app.db import get_db
 from app.models.operations import ExecutionRecord
 from app.models.ops_schemas import CarbonOverrideRequest, ExecutionRead
-from app.services import execution_service
+from app.services import execution_service, rbac_service
 
 router = APIRouter(prefix="/api/executions", tags=["executions"])
 
@@ -21,6 +22,7 @@ def list_executions(
     work_order_id: Optional[int] = None,
     limit: int = Query(200, le=500),
     db: Session = Depends(get_db),
+    ctx: dict = Depends(scope_context),
 ):
     """Field-execution board: submitted/approved/etc. records across work orders."""
     stmt = select(ExecutionRecord)
@@ -29,7 +31,10 @@ def list_executions(
     if work_order_id:
         stmt = stmt.where(ExecutionRecord.work_order_id == work_order_id)
     stmt = stmt.order_by(ExecutionRecord.id.desc()).limit(limit)
-    return list(db.execute(stmt).scalars().all())
+    rows = list(db.execute(stmt).scalars().all())
+    return rbac_service.filter_executions_by_scope(
+        db, ctx["member"], rows, is_demo=ctx["is_demo"]
+    )
 
 
 @router.get("/{execution_id}", response_model=ExecutionRead)
