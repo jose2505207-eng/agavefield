@@ -6,7 +6,7 @@ import { NextRequest, NextResponse } from "next/server";
 const BASE =
   process.env.API_BASE_URL ||
   process.env.NEXT_PUBLIC_API_BASE_URL ||
-  "https://agavefield-nu.vercel.app";
+  "http://localhost:8000"; // dev default; set API_BASE_URL to the real backend in prod
 const API_KEY = process.env.API_KEY || "";
 const TTL_HOURS = Number(process.env.SESSION_TTL_HOURS || "12");
 

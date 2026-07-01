@@ -225,8 +225,11 @@ export const listPhotos = () => apiGet("/api/photos");
 // ---- Public worker completion (token-based; calls the backend DIRECTLY, not
 // the proxy — multipart photo uploads can't pass through the text proxy, and
 // these endpoints are public so no API key is needed). ----
+// The public worker page must reach the FastAPI backend directly (multipart photo
+// uploads can't pass through the text proxy). This MUST be set to the real backend
+// URL in production via NEXT_PUBLIC_API_BASE_URL; the localhost default is dev-only.
 const DIRECT_BASE =
-  process.env.NEXT_PUBLIC_API_BASE_URL || "https://agavefield-nu.vercel.app";
+  process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
 
 export async function getCompletionData(token: string): Promise<any> {
   const res = await fetch(`${DIRECT_BASE}/api/work-orders/complete/${token}/data`, { cache: "no-store" });
